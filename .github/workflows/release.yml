@@ -79,6 +79,11 @@ jobs:
           # Signature des mises à jour automatiques (latest.json + .sig)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # macOS : signature avec un certificat stable (auto-signé « Lol'OS »). Sans elle, chaque
+          # version est une « nouvelle » appli pour macOS et perd l'autorisation « Réseau local ».
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           projectPath: app
           tagName: ${{ github.event.release.tag_name }}

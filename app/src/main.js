@@ -184,7 +184,8 @@ async function chercher() {
     el.classList.remove("cache", "ok", "attente");
     el.classList.add("erreur");
     el.innerHTML = `<span>macOS empêche Lol'OS d'accéder au réseau local. Ouvrez <b>Réglages Système → Confidentialité et
-      sécurité → Réseau local</b>, activez <b>LolOS</b>, puis relancez la recherche.</span>
+      sécurité → Réseau local</b> et activez <b>LolOS</b>. S'il est déjà activé (ancienne version), désactivez-le puis
+      réactivez-le, quittez et relancez Lol'OS.</span>
       <button id="tv-reglages">Ouvrir les réglages</button>`;
     $("#tv-reglages").addEventListener("click", () => invoke("ouvrir_reglages_reseau_local"));
     return;
