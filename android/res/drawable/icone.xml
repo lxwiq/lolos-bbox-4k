@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Icône Lol'OS : trois pétales (clin d'œil à la Bbox), mêmes tracés que docs/logo/lolos-icone.svg -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp" android:height="48dp"
-    android:viewportWidth="48" android:viewportHeight="48">
-    <path android:fillColor="#FF1E4A66" android:pathData="M10,2h28a8,8 0,0 1,8 8v28a8,8 0,0 1,-8 8h-28a8,8 0,0 1,-8 -8v-28a8,8 0,0 1,8 -8z" />
-    <path android:fillColor="#FFF2C879" android:pathData="M32,17m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
-    <path android:fillColor="#FF2F6B78" android:pathData="M2,36 L14,22 L22,30 L30,20 L46,36 L46,38a8,8 0,0 1,-8 8h-28a8,8 0,0 1,-8 -8z" />
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <path android:fillColor="#FF1E3A4A"
+        android:pathData="M274,64 h476 a210,210 0 0 1 210,210 v476 a210,210 0 0 1 -210,210 h-476 a210,210 0 0 1 -210,-210 v-476 a210,210 0 0 1 210,-210 z" />
+    <group android:translateX="512" android:translateY="588">
+        <path android:fillColor="#FFF6D18B" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" />
+        <group android:rotation="120"><path android:fillColor="#FF4FB3BF" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+        <group android:rotation="240"><path android:fillColor="#FFFAFAFA" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+    </group>
 </vector>

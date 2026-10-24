@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/logo/lolos-icone.svg" alt="" width="96">
+</p>
+
+<p align="center">
   <a href="../../releases/latest"><b>⬇️ Télécharger Lol'OS</b></a> ·
   <a href="#utiliser-lolos-sans-claude">Mode d'emploi</a> ·
   <a href="#avec-claude-code">Avec Claude Code</a> ·
@@ -78,9 +82,11 @@ L'installateur vous guide étape par étape :
 
 Le **journal** en bas de la fenêtre s'ouvre d'un clic et affiche en direct chaque commande envoyée à la TV.
 
-| Choix des applis | Recherche de la TV |
+| Bienvenue | Recherche de la TV |
 |---|---|
-| ![Étape « Vos applis » de l'installateur](docs/captures/installateur-applis.png) | ![Étape « Trouver la TV » de l'installateur](docs/captures/installateur-tv.png) |
+| ![Écran d'accueil de l'installateur Lol'OS](docs/captures/installateur-bienvenue.png) | ![Étape « Trouver la TV » de l'installateur](docs/captures/installateur-tv.png) |
+| **Choix des applis** | **Journal en direct** |
+| ![Étape « Vos applis » de l'installateur](docs/captures/installateur-applis.png) | ![Journal en direct : commandes adb et réponses de la TV](docs/captures/installateur-journal.png) |
 
 ### En ligne de commande
 
@@ -200,6 +206,7 @@ Les exécutables des versions sont compilés automatiquement par
 - Code sous licence [MIT](LICENSE).
 - Paysages : vidéos de Wikimedia Commons sous licence CC BY ou domaine public, auteurs listés dans
   [`fonds/CREDITS.txt`](fonds/CREDITS.txt).
+- Logo : trois pétales, clin d'œil (non officiel) au logo Bbox — sources dans [`docs/logo/`](docs/logo).
 - Conçu avec [Claude Code](https://claude.com/claude-code).
 
 <sub>Mots-clés : Bbox 4K lente, supprimer les pubs Bbox, désactiver les applis Bouygues, désencombrer décodeur

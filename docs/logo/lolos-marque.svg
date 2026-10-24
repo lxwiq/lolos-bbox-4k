@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Lol'OS</title>
+  <g transform="translate(512 612) scale(1.15)">
+    <path d="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" fill="#f6d18b"/>
+    <path d="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" fill="#4fb3bf" transform="rotate(120)"/>
+    <path d="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" fill="#fafafa" transform="rotate(240)"/>
+  </g>
+</svg>

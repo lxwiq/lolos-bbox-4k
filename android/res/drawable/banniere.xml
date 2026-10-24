@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Bannière TV 16:9 : montagnes au crépuscule -->
+<!-- Bannière TV 16:9 de Lol'OS : le logo sur un paysage de montagnes -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="160dp" android:height="90dp"
-    android:viewportWidth="160" android:viewportHeight="90">
-    <path android:fillColor="#FF14324A" android:pathData="M0,0h160v90h-160z" />
-    <path android:fillColor="#FF1E4A66" android:pathData="M0,0h160v45h-160z" />
-    <path android:fillColor="#FFF2C879" android:pathData="M112,34m-11,0a11,11 0,1 1,22 0a11,11 0,1 1,-22 0" />
-    <path android:fillColor="#FF2F6B78" android:pathData="M0,70 L28,42 L50,60 L78,30 L108,62 L128,48 L160,72 L160,90 L0,90z" />
-    <path android:fillColor="#FF1B4650" android:pathData="M0,80 L36,58 L64,74 L96,52 L132,76 L160,64 L160,90 L0,90z" />
-    <path android:fillColor="#E6FFFFFF" android:pathData="M78,30 L70,38 L75,37 L78,40 L82,36 L86,38z" />
+    android:viewportWidth="1600" android:viewportHeight="900">
+    <path android:fillColor="#FF1E3A4A" android:pathData="M0,0 h1600 v900 h-1600 z" />
+    <path android:fillColor="#FF2F5F6B" android:pathData="M0,720 L260,520 L430,640 L700,430 L980,650 L1220,500 L1600,700 L1600,900 L0,900 z" />
+    <path android:fillColor="#FF1B4650" android:pathData="M0,820 L330,650 L560,770 L840,610 L1150,780 L1600,640 L1600,900 L0,900 z" />
+    <group android:translateX="800" android:translateY="470" android:scaleX="0.95" android:scaleY="0.95">
+        <path android:fillColor="#FFF6D18B" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" />
+        <group android:rotation="120"><path android:fillColor="#FF4FB3BF" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+        <group android:rotation="240"><path android:fillColor="#FFFAFAFA" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+    </group>
 </vector>
