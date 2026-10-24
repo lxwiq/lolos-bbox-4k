@@ -34,7 +34,9 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -1089,6 +1091,7 @@ def analyser_eligibilite(brut):
 
 
 def lire_etat(adb, profil):
+    paquet = shlex.quote(profil.accueil.get("paquet", "fr.accueil.tv"))
     r = adb.plusieurs([
         ("modele", "getprop ro.product.model"),
         ("fabricant", "getprop ro.product.manufacturer"),
@@ -1102,7 +1105,11 @@ def lire_etat(adb, profil):
         ("eligibilite", "settings get secure current_eligibility"),
         ("dns_mode", "settings get global private_dns_mode"),
         ("dns_hote", "settings get global private_dns_specifier"),
-        ("lanceur", "pm path %s" % shlex.quote(profil.accueil.get("paquet", "fr.accueil.tv"))),
+        ("lanceur", "pm path %s" % paquet),
+        ("lanceur_code", "dumpsys package %s | grep -m1 versionCode" % paquet),
+        ("lanceur_nom", "dumpsys package %s | grep -m1 versionName" % paquet),
+        ("veille_actif", "settings get global lowpower_control_enabled"),
+        ("veille_delai", "settings get global lowpower_control_delay"),
     ])
     memoire = dict((m.group(1), int(m.group(2)) // 1024) for m in re.finditer(r"(\w+):\s+(\d+) kB", r["memoire"]))
     desactives = sorted(l[8:] for l in r["desactives"].splitlines() if l.startswith("package:"))
@@ -1114,6 +1121,11 @@ def lire_etat(adb, profil):
     except (ValueError, IndexError):
         uptime = None
     lanceur = profil.accueil.get("activite", "fr.accueil.tv/.MainActivity")
+    installe = r["lanceur"].startswith("package:")
+    code = re.search(r"versionCode=(\d+)", r["lanceur_code"]) if installe else None
+    nom_version = re.search(r"versionName=(\S+)", r["lanceur_nom"]) if installe else None
+    veille_actif = r["veille_actif"] if r["veille_actif"] not in ("", "null") else None
+    veille_delai = r["veille_delai"] if r["veille_delai"] not in ("", "null") else None
     return {
         "modele": r["modele"], "fabricant": r["fabricant"], "android": r["android"], "firmware": r["firmware"],
         "bbox": est_bbox(profil, r["modele"]),
@@ -1121,7 +1133,12 @@ def lire_etat(adb, profil):
         "allumee_depuis_s": uptime,
         "nb_desactives": len(desactives), "desactives": desactives,
         "accueil": r["accueil"], "accueil_est_lanceur": r["accueil"] == lanceur,
-        "lanceur_installe": r["lanceur"].startswith("package:"),
+        "lanceur_installe": installe,
+        "lanceur_version_code": int(code.group(1)) if code else None,
+        "lanceur_version_nom": nom_version.group(1) if nom_version else None,
+        "veille_profonde": choix_veille(veille_actif, veille_delai),
+        "veille_profonde_detail": {"lowpower_control_enabled": veille_actif, "lowpower_control_delay": veille_delai,
+                                   "libelle": libelle_veille(veille_actif, veille_delai)},
         "eligibilite": r["eligibilite"], "eligibilite_detail": eligibilite, "tv_eligible": tv_ok,
         "dns_prive_mode": dns_mode, "dns_prive_hote": dns_hote, "dns_prive_ok": dns_mode != "hostname",
         "sml_desactive": "fr.bouyguestelecom.tv.sml" in desactives,
@@ -1161,7 +1178,11 @@ def cmd_etat(args):
         ("Applis désactivées", str(e["nb_desactives"])),
         ("SML (SpyObject)", "désactivé ✅" if e["sml_desactive"] else "actif — à désactiver en premier"),
         ("Accueil actuel", e["accueil"] + ("  (lanceur Accueil)" if e["accueil_est_lanceur"] else "")),
-        ("Lanceur Accueil", "installé" if e["lanceur_installe"] else "non installé"),
+        ("Lanceur Accueil", ("installé (versionCode %s%s)" % (e["lanceur_version_code"] or "?",
+                                                            ", version %s" % e["lanceur_version_nom"]
+                                                            if e["lanceur_version_nom"] else ""))
+                            if e["lanceur_installe"] else "non installé"),
+        ("Veille profonde", e["veille_profonde_detail"]["libelle"]),
         ("Éligibilité TV", ("%s %s" % ("✅" if e["tv_eligible"] else "❌", e["eligibilite"] or "inconnue"))),
         ("DNS privé", libelle_dns(e["dns_prive_mode"], e["dns_prive_hote"])),
     ]
@@ -1662,16 +1683,141 @@ def cmd_capture(args):
     return 0
 
 
-# ---- personnaliser / redemarrer ----
+# ---- personnaliser / fonds / veille / redemarrer ----
+# Format des fichiers lus par le lanceur : docs/personnalisation.md. Tout est facultatif.
+
+# Clés de personnalisation.json : (clé, valeur par défaut du lanceur, libellé).
+OPTIONS_LOLOS = [
+    ("salutation", "", "Message d'accueil"),
+    ("demarrage", True, "Écran de démarrage"),
+    ("message_demarrage", "", "Message de démarrage"),
+    ("duree_demarrage_ms", 2500, "Durée du démarrage"),
+    ("nettoyage_memoire", False, "Nettoyage mémoire"),
+    ("infos_systeme", False, "Tuile Infos système"),
+    ("mode_nuit", False, "Mode nuit (21 h – 7 h)"),
+    ("fonds_lolos", True, "Paysages Lol'OS"),
+    ("meteo", None, "Météo"),
+]
+DEFAUTS_LOLOS = {cle: defaut for cle, defaut, _ in OPTIONS_LOLOS}
+LIBELLES_LOLOS = {cle: libelle for cle, _, libelle in OPTIONS_LOLOS}
+OUI_NON = ["oui", "non"]
+URL_GEOCODAGE = "https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=fr&format=json"
+EXTENSIONS_FONDS = {".mp4": "vidéo", ".jpg": "photo", ".jpeg": "photo", ".png": "photo"}
+LIMITE_VIDEO_MO = 100
+VEILLE_PROFONDE = {  # docs/personnalisation.md, « Réglage système : veille profonde »
+    "1h": [("lowpower_control_enabled", "1"), ("lowpower_control_delay", "3600000")],
+    "24h": [("lowpower_control_enabled", "1"), ("lowpower_control_delay", "86400000")],
+    "jamais": [("lowpower_control_enabled", "0")],
+}
+
+
+def emplacements_lolos(profil):
+    """(paquet du lanceur, dossier de ses fichiers sur la TV, dossier des fonds)."""
+    paquet = profil.accueil.get("paquet", "fr.accueil.tv")
+    distant = "/sdcard/Android/data/%s/files" % paquet
+    return paquet, distant, profil.accueil.get("dossier_fonds", distant + "/fonds")
+
+
+def lire_personnalisation(adb, distant):
+    """personnalisation.json actuel sur la TV : (dict, "ok" | "absent" | "illisible")."""
+    r = adb.sh("cat", distant + "/personnalisation.json")
+    if r.code != 0:
+        return {}, ("absent" if "no such file" in (r.sortie + r.erreur).lower() else "illisible")
+    texte = r.sortie.strip().lstrip("﻿")
+    if not texte:
+        return {}, "absent"
+    try:
+        donnees = json.loads(texte)
+    except ValueError:
+        return {}, "illisible"
+    return (donnees, "ok") if isinstance(donnees, dict) else ({}, "illisible")
+
+
+def decrire_option(cle, valeur):
+    if cle == "meteo":
+        if not isinstance(valeur, dict):
+            return "aucune"
+        return "%s (%s, %s)" % (valeur.get("ville") or "?", valeur.get("latitude"), valeur.get("longitude"))
+    if cle == "duree_demarrage_ms" and isinstance(valeur, (int, float)) and not isinstance(valeur, bool):
+        return ("%.1f s" % (valeur / 1000)).replace(".", ",")
+    if isinstance(valeur, bool):
+        return "oui" if valeur else "non"
+    if isinstance(valeur, str):
+        return "« %s »" % valeur if valeur else "(aucun)"
+    return json.dumps(valeur, ensure_ascii=False)
+
+
+def geocoder_ville(ville):
+    """Coordonnées d'une ville (géocodage Open-Meteo, sans compte) : (valeur de « meteo », détails)."""
+    nom = (ville or "").strip()
+    if len(nom) < 2:
+        raise Erreur("Nom de ville trop court : %r" % ville)
+    requete = urllib.request.Request(URL_GEOCODAGE % urllib.parse.quote(nom),
+                                     headers={"User-Agent": "lolos/" + VERSION})
+    try:
+        with urllib.request.urlopen(requete, timeout=20) as reponse:
+            donnees = json.loads(reponse.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        raise Erreur("Recherche de la ville impossible (Open-Meteo) : erreur HTTP %d." % e.code)
+    except (urllib.error.URLError, OSError, socket.timeout) as e:
+        conseil = ""
+        if "CERTIFICATE_VERIFY_FAILED" in str(e):
+            conseil = ("\nCertificats SSL absents : avec le Python de python.org sur macOS, lancez "
+                       "« Install Certificates.command » (dossier Applications/Python 3.x).")
+        raise Erreur("Recherche de la ville impossible (Open-Meteo) : %s%s" % (getattr(e, "reason", e), conseil))
+    except ValueError:
+        raise Erreur("Réponse illisible du service de géocodage Open-Meteo.")
+    resultats = donnees.get("results") if isinstance(donnees, dict) else None
+    if not resultats:
+        raise Erreur("Aucune ville trouvée pour « %s » (Open-Meteo). Vérifiez l'orthographe, ou essayez le code "
+                     "postal ou une ville voisine." % nom)
+    premier = resultats[0]
+    try:
+        latitude, longitude = round(float(premier["latitude"]), 4), round(float(premier["longitude"]), 4)
+    except (KeyError, TypeError, ValueError):
+        raise Erreur("Réponse incomplète d'Open-Meteo pour « %s » (pas de coordonnées)." % nom)
+    meteo = {"ville": premier.get("name") or nom, "latitude": latitude, "longitude": longitude}
+    return meteo, {"pays": premier.get("country"), "region": premier.get("admin1")}
+
+
+def fichiers_fonds(adb, dossier):
+    """{nom: taille en octets} des fichiers du dossier des fonds sur la TV ({} s'il n'existe pas)."""
+    sortie = adb.shell("stat -c '%%s %%n' %s/* 2>/dev/null" % shlex.quote(dossier)).sortie
+    fichiers = {}
+    for ligne in sortie.splitlines():
+        taille, _, chemin = ligne.partition(" ")
+        if taille.isdigit() and chemin.startswith(dossier + "/"):
+            nom = chemin[len(dossier) + 1:]
+            if nom and "/" not in nom:
+                fichiers[nom] = int(taille)
+    return fichiers
+
+
+def fonds_perso(fichiers):
+    """Seulement VOS fonds (perso-*) : les paysages Lol'OS (0*.mp4) n'en font jamais partie."""
+    return {n: t for n, t in fichiers.items() if n.startswith("perso-")}
+
 
 def cmd_personnaliser(args):
-    """Message d'accueil et écran de démarrage de Lol'OS, lus par le lanceur sur la TV."""
+    """Options de Lol'OS (personnalisation.json + logo-demarrage.png), lues par le lanceur sur la TV."""
     profil = charger_profil(getattr(args, "profil", None))
-    acc = profil.accueil
-    paquet = acc.get("paquet", "fr.accueil.tv")
-    distant = "/sdcard/Android/data/%s/files" % paquet
-    reglages = {"salutation": (args.message or "").strip(), "demarrage": not args.sans_demarrage,
-                "message_demarrage": (args.message_demarrage or "").strip(), "duree_demarrage_ms": 2500}
+    paquet, distant, dossier_fonds = emplacements_lolos(profil)
+    fichier_distant = distant + "/personnalisation.json"
+    changements = {}
+    if args.message is not None:
+        changements["salutation"] = args.message.strip()
+    if args.message_demarrage is not None:
+        changements["message_demarrage"] = args.message_demarrage.strip()
+    if args.sans_demarrage and args.demarrage == "oui":
+        raise Erreur("--demarrage oui et --sans-demarrage sont contradictoires.")
+    if args.sans_demarrage or args.demarrage:
+        changements["demarrage"] = not args.sans_demarrage and args.demarrage == "oui"
+    for option, cle in (("nettoyage_memoire", "nettoyage_memoire"), ("infos_systeme", "infos_systeme"),
+                        ("mode_nuit", "mode_nuit"), ("paysages_lolos", "fonds_lolos")):
+        if getattr(args, option):
+            changements[cle] = getattr(args, option) == "oui"
+    if args.sans_meteo:
+        changements["meteo"] = None
     logo = Path(args.logo).expanduser() if args.logo else None
     if logo:
         if not logo.is_file():
@@ -1680,23 +1826,72 @@ def cmd_personnaliser(args):
             raise Erreur("Image PNG, JPEG ou WebP attendue (exportez d'abord un SVG en PNG).")
         if logo.stat().st_size > 3e6:
             info("⚠️ Image lourde (%.1f Mo) : une image de moins de 1000 px suffit." % (logo.stat().st_size / 1e6))
+    demande = bool(changements or args.meteo or logo or args.logo_lolos or args.apercu)
+    if args.afficher and demande:
+        raise Erreur("--afficher s'utilise seul : il montre la configuration actuelle sans rien modifier.")
+    if not demande:
+        return afficher_personnalisation(appareil(args), distant, dossier_fonds, rappel=not args.afficher)
+
+    meteo_trouvee = None
+    if args.meteo:  # avant tout accès à la TV : une ville introuvable n'a rien modifié
+        changements["meteo"], details = geocoder_ville(args.meteo)
+        lieu = ", ".join(x for x in (details.get("region"), details.get("pays")) if x)
+        meteo_trouvee = dict(changements["meteo"], **details)
+        info("Météo : ville trouvée = %s%s (%s, %s)." % (changements["meteo"]["ville"], " — %s" % lieu if lieu else "",
+                                                         changements["meteo"]["latitude"],
+                                                         changements["meteo"]["longitude"]))
+        info("        Vérifiez que c'est la bonne ; sinon précisez (code postal, ville voisine…).")
+    adb = None
+    try:
+        adb = appareil(args)
+    except Erreur as e:
+        if not args.simulation:
+            raise
+        avertir("TV injoignable (%s) : simulation sans la configuration actuelle de la TV."
+                % re.split(r"\.\s|\n", str(e))[0].rstrip(" .:"))
+    existant, etat_fichier = lire_personnalisation(adb, distant) if adb else ({}, "inconnu")
+    if etat_fichier == "illisible" and changements:
+        avertir("personnalisation.json est illisible sur la TV : il sera réécrit avec les seules options indiquées.")
+    # Fusion : seules les clés demandées changent, les autres (et les clés inconnues) sont gardées telles quelles.
+    modifiees = [c for c, v in changements.items() if existant.get(c, DEFAUTS_LOLOS.get(c)) != v]
+    fusion = dict(existant)
+    fusion.update(changements)
+
+    info("Personnalisation%s :" % (" (simulation, rien ne sera modifié)" if args.simulation else ""))
+    for cle in modifiees:
+        avant = existant.get(cle, DEFAUTS_LOLOS.get(cle))
+        info("  • %s : %s → %s" % (LIBELLES_LOLOS.get(cle, cle), decrire_option(cle, avant),
+                                   decrire_option(cle, changements[cle])))
+    for cle in changements:
+        if cle not in modifiees:
+            info("  · %s : déjà %s" % (LIBELLES_LOLOS.get(cle, cle), decrire_option(cle, changements[cle])))
+    if logo:
+        info("  • %s/logo-demarrage.png ← %s" % (distant, logo))
+    elif args.logo_lolos:
+        info("  • suppression de %s/logo-demarrage.png (retour au logo Lol'OS)" % distant)
+    if args.apercu:
+        info("  • aperçu de l'écran de démarrage sur la TV")
+    if changements.get("fonds_lolos") is False and adb and not fonds_perso(fichiers_fonds(adb, dossier_fonds)):
+        avertir("Aucun de vos fonds n'est sur la TV : les paysages Lol'OS restent affichés tant que vous n'en "
+                "ajoutez pas (python3 lolos.py fonds --ajouter …).")
+    resultat = {"simulation": args.simulation, "fichier": fichier_distant, "etat_fichier": etat_fichier,
+                "avant": existant, "apres": fusion, "modifiees": modifiees, "meteo_trouvee": meteo_trouvee,
+                "logo": str(logo) if logo else None, "logo_lolos": bool(args.logo_lolos and not logo)}
     if args.simulation:
-        info("Personnalisation (simulation, rien ne sera modifié) :")
-        info("  • %s/personnalisation.json ← %s" % (distant, json.dumps(reglages, ensure_ascii=False)))
-        if logo:
-            info("  • %s/logo-demarrage.png ← %s" % (distant, logo))
-        elif args.logo_lolos:
-            info("  • suppression de %s/logo-demarrage.png (retour au logo Lol'OS)" % distant)
+        if SORTIE_JSON:
+            afficher_json(resultat)
         return 0
-    adb = appareil(args)
+
     adb.sh("mkdir", "-p", distant)
-    with tempfile.TemporaryDirectory() as dossier:  # dossier privé, pas un fichier fixe dans /tmp
-        fichier = Path(dossier) / "personnalisation.json"
-        fichier.write_text(json.dumps(reglages, ensure_ascii=False, indent=2), encoding="utf-8")
-        r = adb.lancer(["push", str(fichier), distant + "/personnalisation.json"], 60)
-        if r.code != 0:
-            raise Erreur("Envoi impossible : %s" % (r.sortie + r.erreur).strip())
-    journaliser("personnalisation : %s" % json.dumps(reglages, ensure_ascii=False))
+    if modifiees:
+        with tempfile.TemporaryDirectory() as dossier:  # dossier privé, pas un fichier fixe dans /tmp
+            fichier = Path(dossier) / "personnalisation.json"
+            fichier.write_text(json.dumps(fusion, ensure_ascii=False, indent=2), encoding="utf-8")
+            r = adb.lancer(["push", str(fichier), fichier_distant], 60)
+            if r.code != 0:
+                raise Erreur("Envoi impossible : %s" % (r.sortie + r.erreur).strip())
+        journaliser("personnalisation (%s) : %s" % (adb.serie, json.dumps({c: fusion[c] for c in modifiees},
+                                                                         ensure_ascii=False)))
     if logo:
         r = adb.lancer(["push", str(logo), distant + "/logo-demarrage.png"], 120)
         if r.code != 0:
@@ -1705,12 +1900,316 @@ def cmd_personnaliser(args):
     elif args.logo_lolos:
         adb.sh("rm", "-f", distant + "/logo-demarrage.png")
         journaliser("logo de démarrage : retour au logo Lol'OS")
-    info("✅ Personnalisation envoyée (appliquée au prochain retour à l'accueil).")
+    if modifiees or logo or args.logo_lolos:
+        info("✅ Personnalisation envoyée (appliquée au prochain retour à l'accueil).")
+    elif changements:
+        info("Rien à changer : la TV a déjà ces réglages.")
     if args.apercu:
-        adb.sh("am", "start", "-n", acc.get("activite", paquet + "/.MainActivity"),
+        adb.sh("am", "start", "-n", profil.accueil.get("activite", paquet + "/.MainActivity"),
                "--ez", "fr.accueil.tv.APERCU_DEMARRAGE", "true")
         info("  Aperçu de l'écran de démarrage affiché sur la TV.")
+    if SORTIE_JSON:
+        afficher_json(resultat)
     return 0
+
+
+def afficher_personnalisation(adb, distant, dossier_fonds, rappel=False):
+    config, etat_fichier = lire_personnalisation(adb, distant)
+    logo = adb.sh("ls", distant + "/logo-demarrage.png").code == 0
+    perso = sorted(fonds_perso(fichiers_fonds(adb, dossier_fonds)))
+    effective = {cle: config.get(cle, defaut) for cle, defaut, _ in OPTIONS_LOLOS}
+    if SORTIE_JSON:
+        afficher_json({"fichier": distant + "/personnalisation.json", "etat_fichier": etat_fichier,
+                       "configuration": config, "effective": effective, "logo_personnalise": logo,
+                       "fonds_perso": perso})
+        return 0
+    titre = {"ok": "", "absent": " (fichier absent : valeurs par défaut)",
+             "illisible": " (fichier illisible : valeurs par défaut)"}[etat_fichier]
+    info("Personnalisation de Lol'OS sur la TV%s :" % titre)
+    lignes = [(libelle, decrire_option(cle, effective[cle]) + ("" if cle in config else "  (défaut)"))
+              for cle, _, libelle in OPTIONS_LOLOS]
+    lignes.append(("Logo de démarrage", "personnalisé (logo-demarrage.png)" if logo else "logo Lol'OS"))
+    lignes.append(("Vos fonds", ("%d (python3 lolos.py fonds --lister)" % len(perso)) if perso else "aucun"))
+    autres = sorted(set(config) - set(DEFAUTS_LOLOS))
+    if autres:
+        lignes.append(("Autres clés", ", ".join(autres)))
+    largeur = max(len(t) for t, _ in lignes)
+    for titre_ligne, valeur in lignes:
+        info("  %s : %s" % (titre_ligne.ljust(largeur), valeur))
+    if rappel:
+        info("\nPour changer une option :  python3 lolos.py personnaliser --help")
+    return 0
+
+
+# ---- fonds ----
+
+LIGATURES = {"œ": "oe", "Œ": "oe", "æ": "ae", "Æ": "ae", "ß": "ss"}
+
+
+def nettoyer_nom(texte):
+    """Minuscules, sans accents, espaces et caractères spéciaux → « - »."""
+    texte = "".join(LIGATURES.get(c, c) for c in texte)
+    texte = "".join(c for c in unicodedata.normalize("NFKD", texte) if not unicodedata.combining(c)).lower()
+    texte = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9._-]+", "-", texte)).strip("-._")
+    return texte[len("perso-"):] if texte.startswith("perso-") else texte
+
+
+def nom_fond(chemin):
+    """Nom du fond sur la TV : perso-<nom nettoyé>.<extension en minuscules>."""
+    p = Path(chemin)
+    return "perso-%s%s" % (nettoyer_nom(p.stem) or "fond", p.suffix.lower())
+
+
+def type_fond(nom):
+    return EXTENSIONS_FONDS.get(Path(nom).suffix.lower(), "?")
+
+
+def taille_lisible(octets):
+    return ("%.1f Mo" % (octets / 1e6)) if octets >= 1e6 else ("%d Ko" % max(1, round(octets / 1e3)))
+
+
+def espace_libre(adb, chemin="/sdcard"):
+    """Octets libres sur le stockage de la TV, ou None si illisible."""
+    for ligne in reversed(adb.texte("df -k %s" % shlex.quote(chemin)).splitlines()):
+        champs = ligne.split()
+        if len(champs) >= 6 and champs[3].isdigit():
+            return int(champs[3]) * 1024
+    return None
+
+
+def cmd_fonds(args):
+    """Vos fonds d'écran (perso-*) dans le dossier des fonds de Lol'OS sur la TV."""
+    profil = charger_profil(getattr(args, "profil", None))
+    paquet, distant, dossier = emplacements_lolos(profil)
+    if args.ajouter:
+        return ajouter_fonds(args, paquet, dossier)
+    if args.retirer or args.retirer_tout:
+        return retirer_fonds(args, distant, dossier)
+    adb = appareil(args)
+    fichiers = fichiers_fonds(adb, dossier)
+    perso = sorted(fonds_perso(fichiers).items())
+    paysages = [n for n in fichiers if not n.startswith("perso-") and n.lower().endswith(".mp4")]
+    if SORTIE_JSON:
+        afficher_json({"dossier": dossier, "paysages_lolos": len(paysages),
+                       "fonds_perso": [{"nom": n, "type": type_fond(n), "taille_octets": t} for n, t in perso]})
+        return 0
+    if perso:
+        info("Vos fonds sur la TV (%s) :" % dossier)
+        tableau(["Fond", "Type", "Taille"], [[n, type_fond(n), taille_lisible(t)] for n, t in perso])
+        info("\nTotal : %d fond(s), %.0f Mo." % (len(perso), sum(t for _, t in perso) / 1e6))
+    else:
+        info("Aucun de vos fonds sur la TV. Pour en ajouter :  python3 lolos.py fonds --ajouter photo.jpg video.mp4")
+    info("Paysages Lol'OS : %d vidéo(s) (jamais supprimées par cette commande ; pour ne plus les afficher : "
+         "python3 lolos.py personnaliser --paysages-lolos non)." % len(paysages))
+    return 0
+
+
+def ajouter_fonds(args, paquet, dossier):
+    envois, origines = [], {}
+    for brut in args.ajouter:  # tout est vérifié avant le premier envoi
+        f = Path(brut).expanduser()
+        if not f.is_file():
+            raise Erreur("Fichier introuvable : %s" % brut)
+        if f.suffix.lower() not in EXTENSIONS_FONDS:
+            raise Erreur("%s : format non pris en charge. Vidéos .mp4 (H.264 ou H.265) ou photos .jpg, .jpeg, "
+                         ".png." % f.name)
+        nom = nom_fond(f)
+        if nom in origines:
+            if origines[nom] == f.resolve():
+                continue
+            raise Erreur("%s et %s auraient le même nom sur la TV (%s) : renommez l'un des deux."
+                         % (origines[nom].name, f.name, nom))
+        origines[nom] = f.resolve()
+        taille = f.stat().st_size
+        if type_fond(nom) == "vidéo" and taille > LIMITE_VIDEO_MO * 1e6:
+            avertir("%s pèse %.0f Mo : au-delà de %d Mo la box (peu de stockage) peine. Conseil : 1080p, H.264 ou "
+                    "H.265, 30 à 60 s en boucle." % (f.name, taille / 1e6, LIMITE_VIDEO_MO))
+        elif type_fond(nom) == "photo" and taille > 20e6:
+            avertir("%s est une photo lourde (%.0f Mo) : 1920×1080 suffit." % (f.name, taille / 1e6))
+        envois.append((f, nom, taille))
+    adb = appareil(args)
+    presents = fichiers_fonds(adb, dossier)
+    a_envoyer = [(f, nom, t) for f, nom, t in envois if presents.get(nom) != t]
+    deja = [nom for _, nom, t in envois if presents.get(nom) == t]
+    total = sum(t for _, _, t in a_envoyer)
+    libre = espace_libre(adb) if a_envoyer else None
+    if libre is not None and total > libre - 200e6:  # on laisse de la marge à la box
+        raise Erreur("Pas assez de place sur la TV : %.0f Mo à envoyer, %.0f Mo libres (200 Mo gardés pour la box)."
+                     % (total / 1e6, libre / 1e6))
+    lanceur = adb.sh("pm", "path", paquet).sortie.strip().startswith("package:")
+    if not lanceur:
+        avertir("Le lanceur Lol'OS n'est pas installé : vos fonds serviront après « python3 lolos.py accueil ».")
+    info("Vos fonds%s :" % (" (simulation, rien ne sera modifié)" if args.simulation else ""))
+    for f, nom, t in a_envoyer:
+        info("  • %s %s → %s (%s, %s)" % ("remplacer" if nom in presents else "envoyer", f.name, nom,
+                                          type_fond(nom), taille_lisible(t)))
+    for nom in deja:
+        info("  · %s déjà sur la TV (même taille)" % nom)
+    if any(type_fond(n) == "vidéo" for _, n, _ in a_envoyer):
+        info("  (Vidéos : H.264 ou H.265 en 1080p conseillé, son ignoré ; le format n'est pas vérifié ici.)")
+    resultat = {"simulation": args.simulation, "dossier": dossier, "deja_presents": deja,
+                "a_envoyer": [{"fichier": str(f), "nom": nom, "taille_octets": t} for f, nom, t in a_envoyer]}
+    if args.simulation or not a_envoyer:
+        if not a_envoyer:
+            info("Rien à envoyer.")
+        if SORTIE_JSON:
+            afficher_json(resultat)
+        return 0
+    adb.sh("mkdir", "-p", dossier)
+    journaliser("== lolos fonds --ajouter (%d fichier(s)) sur %s" % (len(a_envoyer), adb.serie))
+    echecs = []
+    for f, nom, t in a_envoyer:
+        info("  → envoi de %s (%s)…" % (nom, taille_lisible(t)))
+        r = adb.lancer(["push", str(f), "%s/%s" % (dossier, nom)], 900)
+        journaliser("adb push %s %s/%s" % (f.name, dossier, nom))
+        if r.code != 0:
+            echecs.append(nom)
+            avertir("Envoi de %s impossible : %s" % (f.name, (r.erreur or r.sortie).strip()))
+    resultat["echecs"] = echecs
+    if SORTIE_JSON:
+        afficher_json(resultat)
+    else:
+        info("✅ %d fond(s) envoyé(s) : visibles au prochain retour à l'accueil." % (len(a_envoyer) - len(echecs)))
+        info("   Pour n'afficher que vos fonds :  python3 lolos.py personnaliser --paysages-lolos non")
+    return 1 if echecs else 0
+
+
+def trouver_fonds_perso(brut, perso):
+    """Fonds perso désignés par NOM : nom sur la TV, nom du fichier d'origine, avec ou sans extension."""
+    nom = Path(brut).name
+    if nom in perso:
+        return [nom]
+    p = Path(nom)
+    if p.suffix.lower() in EXTENSIONS_FONDS:
+        candidat = nom_fond(p)
+        return [candidat] if candidat in perso else []
+    base = "perso-%s" % (nettoyer_nom(nom) or "fond")
+    return sorted(n for n in perso if Path(n).stem == base)
+
+
+def retirer_fonds(args, distant, dossier):
+    adb = appareil(args)
+    perso = fonds_perso(fichiers_fonds(adb, dossier))
+    if args.retirer_tout:
+        cibles = sorted(perso)
+    else:
+        cibles, inconnus = [], []
+        for brut in args.retirer:
+            trouves = trouver_fonds_perso(brut, perso)
+            if not trouves:
+                inconnus.append(brut)
+            cibles += [n for n in trouves if n not in cibles]
+        if inconnus:
+            raise Erreur("Introuvable parmi vos fonds sur la TV : %s\nVos fonds : %s\n(les paysages Lol'OS ne "
+                         "peuvent pas être retirés)" % (", ".join(inconnus), ", ".join(sorted(perso)) or "aucun"))
+    # Garde-fou : jamais autre chose qu'un fichier perso-* du dossier des fonds.
+    cibles = [n for n in cibles if n.startswith("perso-") and "/" not in n and n in perso]
+    resultat = {"simulation": args.simulation, "dossier": dossier, "a_retirer": cibles}
+    if not cibles:
+        info("Aucun de vos fonds sur la TV : rien à retirer.")
+        if SORTIE_JSON:
+            afficher_json(resultat)
+        return 0
+    info("Fonds à retirer de la TV%s :" % (" (simulation, rien ne sera modifié)" if args.simulation else ""))
+    for n in cibles:
+        info("  • %s (%s)" % (n, taille_lisible(perso[n])))
+    if args.simulation:
+        if SORTIE_JSON:
+            afficher_json(resultat)
+        return 0
+    confirmer(args, "\nRetirer ces %d fond(s) de la TV ? (gardez vos fichiers d'origine : ils ne sont pas "
+                    "récupérables depuis la TV)" % len(cibles))
+    journaliser("== lolos fonds --retirer (%d fichier(s)) sur %s" % (len(cibles), adb.serie))
+    for n in cibles:
+        adb.sh("rm", "-f", "%s/%s" % (dossier, n))
+        journaliser("adb shell rm -f %s/%s" % (dossier, n))
+    restants = fonds_perso(fichiers_fonds(adb, dossier))
+    resultat["echecs"] = [n for n in cibles if n in restants]
+    if SORTIE_JSON:
+        afficher_json(resultat)
+    else:
+        info("✅ %d fond(s) retiré(s). Il vous en reste %d." % (len(cibles) - len(resultat["echecs"]), len(restants)))
+        if not restants and lire_personnalisation(adb, distant)[0].get("fonds_lolos") is False:
+            info("   Plus aucun de vos fonds : les paysages Lol'OS reviennent (option « paysages Lol'OS » : non).")
+    return 1 if resultat["echecs"] else 0
+
+
+# ---- veille ----
+
+def choix_veille(actif, delai):
+    if actif == "0":
+        return "jamais"
+    if actif == "1":
+        return {"3600000": "1h", "86400000": "24h"}.get(delai, "autre")
+    return None
+
+
+def libelle_veille(actif, delai):
+    choix = choix_veille(actif, delai)
+    if choix == "jamais":
+        return "jamais (la box reste en veille, rallumage immédiat)"
+    if choix == "1h":
+        return "après 1 h de veille (réglage Bouygues)"
+    if choix == "24h":
+        return "après 24 h de veille"
+    if choix == "autre":
+        try:
+            minutes = int(delai) // 60000
+            return "après %s de veille" % ("%d h" % (minutes // 60) if minutes % 60 == 0 else "%d min" % minutes)
+        except (TypeError, ValueError):
+            return "activée, délai inconnu (%s)" % delai
+    if actif is None:
+        return "non défini (comportement d'origine de la box)"
+    return "inconnu (lowpower_control_enabled = %s)" % actif
+
+
+def lire_veille(adb):
+    v = lire_reglages(adb, ["global/lowpower_control_enabled", "global/lowpower_control_delay"])
+    actif, delai = v["global/lowpower_control_enabled"], v["global/lowpower_control_delay"]
+    return {"profonde": choix_veille(actif, delai), "libelle": libelle_veille(actif, delai),
+            "lowpower_control_enabled": actif, "lowpower_control_delay": delai}
+
+
+def cmd_veille(args):
+    adb = appareil(args)
+    avant = lire_veille(adb)
+    if not args.profonde:
+        if SORTIE_JSON:
+            afficher_json(avant)
+            return 0
+        info("Veille profonde : %s" % avant["libelle"])
+        info("Au-delà de ce délai en veille, la Bbox s'éteint vraiment (rallumage = démarrage complet, ≈1 min).")
+        info("Changer :  python3 lolos.py veille --profonde 1h|24h|jamais   (1h = réglage Bouygues)")
+        return 0
+    actions = [{"type": "reglage", "id": "global/" + cle, "ns": "global", "cle": cle, "valeur": valeur,
+                "avant": avant[cle], "nom": "veille profonde : %s" % args.profonde}
+               for cle, valeur in VEILLE_PROFONDE[args.profonde] if avant[cle] != valeur]
+    sauvegarde = None
+    if actions and not args.simulation:
+        sauvegarde = exiger_sauvegarde(adb, args)
+    if not SORTIE_JSON:
+        info("Veille profonde%s : %s" % (" (simulation, rien ne sera modifié)" if args.simulation else "",
+                                          avant["libelle"]))
+        if not actions:
+            info("  Rien à faire : déjà réglée sur « %s »." % args.profonde)
+        for i, a in enumerate(actions, 1):
+            info("  %2d. %s" % (i, decrire_action(a)))
+        if args.simulation and actions and not sauvegardes_de(adb):
+            info("⚠️  Aucune sauvegarde de cette TV : lancez « sauvegarder » avant de changer ce réglage.")
+    if args.simulation or not actions:
+        if SORTIE_JSON:
+            afficher_json({"simulation": args.simulation, "avant": avant, "actions": actions})
+        return 0
+    journaliser("== lolos veille --profonde %s sur %s (sauvegarde : %s)" % (args.profonde, adb.serie, sauvegarde))
+    resultats = executer_plan(adb, actions)
+    apres = lire_veille(adb)
+    echec = any(not a["ok"] for a in resultats) or apres["profonde"] != args.profonde
+    if SORTIE_JSON:
+        afficher_json({"simulation": False, "avant": avant, "resultats": resultats, "apres": apres})
+    else:
+        info("%s Veille profonde : %s" % ("❌" if echec else "✅", apres["libelle"]))
+        info("   Revenir au réglage Bouygues :  python3 lolos.py veille --profonde 1h   (ou « restaurer »)")
+    return 1 if echec else 0
 
 
 def cmd_redemarrer(args):
@@ -1953,7 +2452,8 @@ def construire_parseur():
     sp.add_argument("adresse", nargs="?", metavar="IP", help="adresse IP de la TV (ex. 192.168.1.20)")
     sp.set_defaults(fonction=cmd_connecter)
 
-    sp = commande("etat", "afficher l'état de la TV (modèle, mémoire, accueil, DNS, éligibilité…)")
+    sp = commande("etat", "afficher l'état de la TV (modèle, mémoire, accueil, version du lanceur, DNS, "
+                          "éligibilité, veille profonde…)")
     sp.set_defaults(fonction=cmd_etat)
 
     sp = commande("sauvegarder", "sauvegarder l'état de la TV (à faire AVANT toute modification)")
@@ -1993,18 +2493,62 @@ def construire_parseur():
     sp.add_argument("--attente", type=int, default=10, metavar="S", help="secondes d'attente avant la mesure (défaut : 10)")
     sp.set_defaults(fonction=cmd_verifier)
 
-    sp = commande("personnaliser", "message d'accueil et écran de démarrage de Lol'OS",
-                  "Message affiché sur l'accueil ({moment} devient Bonjour / Bon après-midi / Bonsoir) et écran "
-                  "de démarrage (logo + message) montré quand la box s'allume. Rien n'est installé : deux fichiers "
-                  "sont déposés dans le dossier de Lol'OS sur la TV.")
-    sp.add_argument("--message", metavar="TEXTE", help="message d'accueil, ex. \"{moment} Lolo\" (vide = aucun)")
-    sp.add_argument("--message-demarrage", metavar="TEXTE", help="message de l'écran de démarrage (facultatif)")
-    sp.add_argument("--logo", metavar="IMAGE", help="image PNG/JPEG/WebP de l'écran de démarrage")
-    sp.add_argument("--logo-lolos", action="store_true", help="revenir au logo Lol'OS")
-    sp.add_argument("--sans-demarrage", action="store_true", help="ne pas afficher d'écran de démarrage")
+    sp = commande("personnaliser", "options de Lol'OS : message, écran de démarrage, météo, mode nuit…",
+                  "Toutes les options sont facultatives : seules celles indiquées changent, les autres gardent "
+                  "leur valeur actuelle sur la TV (personnalisation.json, relu puis complété). Sans option, ou "
+                  "avec --afficher : montre la configuration actuelle. {moment} devient Bonjour / Bon "
+                  "après-midi / Bonsoir. Rien n'est installé : des fichiers sont déposés dans le dossier de "
+                  "Lol'OS sur la TV, pris en compte au prochain retour à l'accueil.")
+    sp.add_argument("--afficher", action="store_true", help="afficher la configuration actuelle (rien n'est modifié)")
+    g = sp.add_argument_group("accueil et écran de démarrage")
+    g.add_argument("--message", metavar="TEXTE", help="message d'accueil, ex. \"{moment} Lolo\" (vide = aucun)")
+    g.add_argument("--message-demarrage", metavar="TEXTE", help="message de l'écran de démarrage (vide = aucun)")
+    g.add_argument("--demarrage", choices=OUI_NON, help="écran de démarrage Lol'OS à l'allumage (défaut : oui)")
+    g.add_argument("--sans-demarrage", action="store_true", help="= --demarrage non")
+    g.add_argument("--logo", metavar="IMAGE", help="image PNG/JPEG/WebP de l'écran de démarrage")
+    g.add_argument("--logo-lolos", action="store_true", help="revenir au logo Lol'OS")
+    g = sp.add_argument_group("options facultatives (désactivées par défaut, sauf les paysages)")
+    g.add_argument("--nettoyage-memoire", choices=OUI_NON,
+                   help="au retour à l'accueil, fermer les applis restées en arrière-plan (sauf TV en direct, "
+                        "Chromecast, YouTube)")
+    g.add_argument("--infos-systeme", choices=OUI_NON,
+                   help="tuile « Infos système » (mémoire, stockage, réseau, température, versions)")
+    g.add_argument("--mode-nuit", choices=OUI_NON, help="de 21 h à 7 h : accueil assombri et paysages calmes")
+    g.add_argument("--paysages-lolos", choices=OUI_NON,
+                   help="afficher les paysages Lol'OS (non : seulement vos fonds, voir la commande « fonds »)")
+    m = g.add_mutually_exclusive_group()
+    m.add_argument("--meteo", metavar="VILLE",
+                   help="météo du jour sous la date (Open-Meteo, sans compte) ; la ville trouvée est affichée "
+                        "pour vérification")
+    m.add_argument("--sans-meteo", action="store_true", help="retirer la météo")
     sp.add_argument("--apercu", action="store_true", help="montrer tout de suite l'écran de démarrage sur la TV")
     sp.add_argument("--simulation", action="store_true", help="afficher ce qui serait envoyé sans rien modifier")
     sp.set_defaults(fonction=cmd_personnaliser)
+
+    sp = commande("fonds", "vos fonds d'écran (vidéos .mp4, photos .jpg/.png) sur l'accueil Lol'OS",
+                  "Ajoute, liste ou retire VOS fonds (fichiers perso-* du dossier des fonds de Lol'OS sur la TV). "
+                  "Les paysages Lol'OS ne sont jamais supprimés (pour ne plus les voir : personnaliser "
+                  "--paysages-lolos non). Vidéos : H.264 ou H.265, 1080p conseillé, son ignoré. Photos : "
+                  "1920×1080 conseillé, animées par un lent zoom. Sans option : liste vos fonds.")
+    g = sp.add_mutually_exclusive_group()
+    g.add_argument("--ajouter", nargs="+", metavar="FICHIER",
+                   help="envoyer ces fichiers (renommés perso-<nom>.<ext> ; ignorés s'ils y sont déjà)")
+    g.add_argument("--lister", action="store_true", help="lister vos fonds présents sur la TV (par défaut)")
+    g.add_argument("--retirer", nargs="+", metavar="NOM",
+                   help="retirer ces fonds (nom sur la TV, ex. perso-vacances.jpg, ou nom du fichier d'origine)")
+    g.add_argument("--retirer-tout", action="store_true", help="retirer tous vos fonds (perso-*)")
+    sp.add_argument("--simulation", action="store_true", help="afficher ce qui serait fait sans rien modifier")
+    sp.set_defaults(fonction=cmd_fonds)
+
+    sp = commande("veille", "veille profonde : délai avant que la box s'éteigne vraiment",
+                  "Au-delà d'un certain temps en veille, la Bbox s'éteint vraiment (rallumage = démarrage "
+                  "complet, ≈1 min). 1h = réglage Bouygues. Sans option : affiche le réglage actuel. Ce réglage "
+                  "fait partie de la sauvegarde et « restaurer » le remet.")
+    sp.add_argument("--profonde", choices=sorted(VEILLE_PROFONDE),
+                    help="s'éteindre vraiment après 1 h (réglage Bouygues), 24 h, ou jamais")
+    sp.add_argument("--simulation", action="store_true", help="afficher le plan sans rien modifier")
+    sp.add_argument("--sans-sauvegarde", action="store_true", help="ne pas exiger de sauvegarde préalable (déconseillé)")
+    sp.set_defaults(fonction=cmd_veille)
 
     sp = commande("redemarrer", "redémarrer la box (demande confirmation, ou --oui)")
     sp.set_defaults(fonction=cmd_redemarrer)

@@ -112,8 +112,17 @@ python3 cli/lolos.py verifier --direct   # vérifie tout, y compris la TV en dir
 python3 cli/lolos.py restaurer           # remet la TV comme avant
 ```
 
-`python3 cli/lolos.py personnaliser --message "{moment} Lolo" --logo image.png --apercu` et
-`python3 cli/lolos.py redemarrer` complètent la liste.
+Personnalisation et options (toutes facultatives) :
+
+```bash
+python3 cli/lolos.py personnaliser --message "{moment} Lolo" --logo image.png --apercu
+python3 cli/lolos.py personnaliser --meteo Lyon --mode-nuit oui --nettoyage-memoire oui --infos-systeme oui
+python3 cli/lolos.py fonds --ajouter vacances.jpg feu-de-cheminee.mp4   # vos fonds d'écran
+python3 cli/lolos.py veille --profonde 24h                               # 1h (Bouygues), 24h ou jamais
+python3 cli/lolos.py redemarrer
+```
+
+Le détail des options est dans [`docs/personnalisation.md`](docs/personnalisation.md).
 `--simulation` montre ce qui serait fait sans rien changer, `--json` donne une sortie lisible par un programme.
 Si `adb` manque, le script propose de l'installer.
 

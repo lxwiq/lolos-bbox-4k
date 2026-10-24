@@ -1,6 +1,6 @@
 ---
 name: lolos
-description: Désencombrer et accélérer une TV Bbox 4K de Bouygues Telecom (ou une autre Android TV) par ADB avec cli/lolos.py — couper pubs, télémétrie et applis inutilisées, installer l'écran d'accueil minimaliste « Accueil », vérifier que la TV en direct marche encore, ou tout restaurer. À utiliser quand l'utilisateur veut alléger, nettoyer, accélérer sa Bbox / son décodeur / son Android TV, retirer les pubs ou recommandations, remplacer l'accueil Bbox, ou revenir à l'état d'origine.
+description: Désencombrer et accélérer une TV Bbox 4K de Bouygues Telecom (ou une autre Android TV) par ADB avec cli/lolos.py — couper pubs, télémétrie et applis inutilisées, installer l'écran d'accueil minimaliste « Accueil », le personnaliser (message, météo, mode nuit, vos photos/vidéos en fond, écran de démarrage, veille profonde), vérifier que la TV en direct marche encore, ou tout restaurer. À utiliser quand l'utilisateur veut alléger, nettoyer, accélérer sa Bbox / son décodeur / son Android TV, retirer les pubs ou recommandations, remplacer l'accueil Bbox, ou revenir à l'état d'origine.
 ---
 
 # Désencombrer une Bbox 4K avec lolos
@@ -112,6 +112,7 @@ Bbox viennent des serveurs Bouygues et ne peuvent pas être retirés autrement.
 ```
 python3 cli/lolos.py accueil
 ```
+Ensuite, proposez les options facultatives (section « Options facultatives de Lol'OS » plus bas).
 
 ### 9. Vérifier
 ```
@@ -136,6 +137,56 @@ python3 cli/lolos.py restaurer --garder-accueil --oui  # garder le lanceur insta
 ```
 La restauration réactive les applis, remet les réglages sauvegardés, désinstalle le lanceur et remet
 l'accueil Bbox. Un redémarrage est conseillé ensuite.
+
+## Options facultatives de Lol'OS
+
+Tout est **désactivé par défaut** et rien n'est imposé (format : `docs/personnalisation.md`). Regardez d'abord
+ce qui est déjà réglé (`personnaliser --afficher --json`), puis demandez avec **AskUserQuestion**
+(`multiSelect: true`, 4 options au maximum par question, rien de coché = rien à faire) :
+- « Accueil » : message d'accueil (« {moment} Prénom ») · météo du jour (demandez ensuite la ville) ·
+  mode nuit (21 h – 7 h : accueil assombri, paysages calmes) · tuile « Infos système » ;
+- « Confort » : vos photos/vidéos en fond · nettoyage mémoire au retour à l'accueil (ferme les applis en
+  arrière-plan sauf TV, Chromecast, YouTube) · écran de démarrage (logo, message, ou aucun) · veille profonde
+  (1 h = réglage Bouygues, 24 h, jamais).
+Si l'utilisateur ajoute ses fonds, demandez s'il garde aussi les paysages Lol'OS.
+
+```
+python3 cli/lolos.py personnaliser --afficher                 # configuration actuelle (--json possible)
+python3 cli/lolos.py personnaliser --message "{moment} Lolo" --mode-nuit oui --infos-systeme oui
+python3 cli/lolos.py personnaliser --nettoyage-memoire oui
+python3 cli/lolos.py personnaliser --meteo "Lyon"             # ou un code postal ; --sans-meteo pour retirer
+python3 cli/lolos.py personnaliser --demarrage non            # ou --message-demarrage "…", --logo image.png, --logo-lolos
+python3 cli/lolos.py personnaliser --paysages-lolos non       # seulement ses fonds
+python3 cli/lolos.py fonds --ajouter ~/Images/plage.jpg ~/Films/feu.mp4
+python3 cli/lolos.py fonds --lister
+python3 cli/lolos.py fonds --retirer perso-plage.jpg --oui    # ou --retirer-tout --oui (après accord)
+python3 cli/lolos.py veille                                   # réglage actuel
+python3 cli/lolos.py veille --profonde 24h                    # 1h | 24h | jamais
+```
+- `personnaliser` relit le fichier de la TV et **ne change que les options passées** ; `--simulation` montre
+  avant → après. Chaque option `oui|non` peut être remise à `non` de la même façon.
+- `--meteo` affiche la ville trouvée (région, pays) : **faites-la confirmer** à l'utilisateur ; si ce n'est pas
+  la bonne, relancez avec le code postal ou une ville voisine.
+- `--apercu` montre l'écran de démarrage sur la TV : prévenez avant.
+- Fonds : `.mp4` H.264/H.265 en 1080p (moins de 100 Mo conseillé, son ignoré), `.jpg`/`.png` en 1920×1080
+  (lent zoom). Ils sont renommés `perso-<nom>` ; les paysages Lol'OS (`0*.mp4`) ne sont jamais supprimés.
+  Ces fichiers et la personnalisation vivent dans le dossier du lanceur : `restaurer` (qui le désinstalle)
+  les efface, l'utilisateur doit garder ses originaux.
+- Veille profonde : au-delà du délai, la box s'éteint vraiment (rallumage ≈1 min). C'est un réglage système :
+  `veille --profonde` exige une sauvegarde, et `restaurer` remet la valeur sauvegardée.
+- `etat` affiche aussi la version installée du lanceur (versionCode) et la veille profonde.
+
+### Faits à connaître (ne pas « corriger »)
+- L'animation de démarrage de la Bbox et son écran « Bonjour… » **ne peuvent pas être changés sans root**
+  (partition système, contenu servi par Bouygues). L'écran de démarrage Lol'OS les remplace juste après.
+- L'appli Lol'OS porte **exprès** le libellé d'application « BBOX TV » (l'activité s'appelle « Lol'OS ») : au
+  réveil, le service d'alimentation de la Bbox (`fr.bouyguestelecom.tv.power`) relance son interface sauf si
+  l'appli au premier plan est dans sa liste blanche. Ne le renommez pas.
+- Tuiles « Redémarrer » et « Mettre en veille » du lanceur : broadcast explicite vers
+  `fr.bouyguestelecom.tv.power/.PowerReceiver`, actions `fr.bouyguestelecom.tv.power.REBOOT_QUIESCENT` (la
+  box redémarre et revient en veille) et `fr.bouyguestelecom.tv.power.GO_TO_SLEEP`. Jamais
+  `MonitorUpdateService` (OTA), `DreamApplyService` (extinction) ni `FactoryResetActivity`. (La commande
+  `redemarrer` du CLI fait un `adb reboot` classique.)
 
 ## Dépannage
 
