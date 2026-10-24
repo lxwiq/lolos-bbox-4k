@@ -310,6 +310,78 @@ async fn redemarrer_box(etat: State<'_, Appli>) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize)]
+struct MiseAJour {
+    version: String,
+    notes: Option<String>,
+    /// false : paquet .deb/.rpm sous Linux, à mettre à jour par le gestionnaire de paquets
+    automatique: bool,
+}
+
+/// Une version plus récente de l'installateur est-elle publiée sur GitHub ?
+#[tauri::command]
+async fn verifier_mise_a_jour(app: AppHandle) -> Result<Option<MiseAJour>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let maj = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    adb::tracer("info", match &maj {
+        Some(m) => format!("mise à jour disponible : Lol'OS {}", m.version),
+        None => "Lol'OS est à jour".into(),
+    });
+    Ok(maj.map(|m| MiseAJour {
+        version: m.version.clone(),
+        notes: m.body.clone(),
+        automatique: !cfg!(target_os = "linux") || std::env::var_os("APPIMAGE").is_some(),
+    }))
+}
+
+/// Télécharge, vérifie la signature, installe, puis relance l'appli.
+#[tauri::command]
+async fn installer_mise_a_jour(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let maj = app
+        .updater()
+        .map_err(|e| e.to_string())?
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("aucune mise à jour disponible")?;
+    adb::tracer("cmd", format!("téléchargement de Lol'OS {}", maj.version));
+    let (mut recu, mut dernier) = (0u64, 0u64);
+    let suivi = app.clone();
+    maj.download_and_install(
+        move |morceau, total| {
+            recu += morceau as u64;
+            if let Some(total) = total.filter(|t| *t > 0) {
+                let pourcent = recu * 100 / total;
+                if pourcent >= dernier + 10 {
+                    dernier = pourcent;
+                    let _ = suivi.emit("journal", format!("Téléchargement de la mise à jour : {pourcent} %"));
+                }
+            }
+        },
+        || adb::tracer("info", "mise à jour téléchargée, installation…"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+/// Ouvre la page des versions dans le navigateur (mise à jour manuelle).
+#[tauri::command]
+fn ouvrir_page_versions() -> Result<(), String> {
+    let url = "https://github.com/lxwiq/lolos-bbox-4k/releases/latest";
+    let mut c = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", url]);
+        c
+    } else {
+        let mut c = std::process::Command::new(if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" });
+        c.arg(url);
+        c
+    };
+    c.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// Ouvre Réglages Système → Confidentialité et sécurité → Réseau local (macOS).
 #[tauri::command]
 fn ouvrir_reglages_reseau_local() -> Result<(), String> {
@@ -328,6 +400,7 @@ fn dossier_donnees(etat: State<Appli>) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let dossier = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dossier)?;
@@ -359,7 +432,10 @@ pub fn run() {
             diagnostic_reseau,
             ouvrir_reglages_reseau_local,
             personnaliser,
-            redemarrer_box
+            redemarrer_box,
+            verifier_mise_a_jour,
+            installer_mise_a_jour,
+            ouvrir_page_versions
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");

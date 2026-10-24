@@ -231,6 +231,7 @@ $("#tv-connecter").addEventListener("click", (e) =>
       statut(el, "✓ Connecté à la TV " + ip, "ok");
       $("#tv-suivant").disabled = false;
       faite("tv");
+      verifierAccueilTv();
     } catch (err) {
       statut(el, "Connexion impossible : " + (err.message || err), "erreur");
       $("#tv-aide").open = true;
@@ -524,4 +525,53 @@ $("#rest-lancer").addEventListener("click", (e) =>
   })
 );
 
+// ------------------------------------------------------------------ mises à jour
+
+/** versionCode Android → « 1.1.0 » (les toutes premières versions n'avaient pas ce format). */
+function versionLisible(code) {
+  return code >= 10000 ? `${Math.floor(code / 10000)}.${Math.floor(code / 100) % 100}.${code % 100}` : "ancienne version";
+}
+
+async function verifierMiseAJour() {
+  try {
+    const maj = await invoke("verifier_mise_a_jour");
+    if (!maj) return;
+    $("#maj-texte").textContent = `Lol'OS ${maj.version} est disponible.`;
+    $("#maj-bouton").textContent = maj.automatique ? "Mettre à jour" : "Télécharger";
+    $("#maj-bouton").onclick = (e) =>
+      occupe(e.target, async () => {
+        if (!maj.automatique) return invoke("ouvrir_page_versions");
+        journal("Mise à jour vers Lol'OS " + maj.version + "… l'appli va redémarrer.");
+        try { await invoke("installer_mise_a_jour"); } catch (err) { journal("Mise à jour impossible : " + err); }
+      });
+    $("#maj").classList.remove("cache");
+  } catch (err) {
+    journal("Vérification des mises à jour impossible (" + err + ").");
+  }
+}
+
+/** Accueil de la TV plus ancien que celui livré avec cet installateur ? */
+async function verifierAccueilTv() {
+  try {
+    const t = await invoke("etat_tv");
+    const ancien = t.accueil_installe && (t.accueil_version ?? 0) < t.accueil_disponible;
+    $("#maj-tv").classList.toggle("cache", !ancien);
+    if (!ancien) return;
+    $("#maj-tv-texte").textContent =
+      `L'accueil Lol'OS de la TV peut être mis à jour (${versionLisible(t.accueil_version ?? 0)} → ${versionLisible(t.accueil_disponible)}). ` +
+      "Vos réglages sont conservés.";
+    $("#maj-tv-bouton").onclick = (e) =>
+      occupe(e.target, async () => {
+        try {
+          await invoke("installer_accueil", { fonds: true });
+          $("#maj-tv").classList.add("cache");
+          journal("✓ Accueil de la TV mis à jour.");
+        } catch (err) {
+          journal("Erreur : " + err);
+        }
+      });
+  } catch {}
+}
+
 aller("bienvenue");
+verifierMiseAJour();

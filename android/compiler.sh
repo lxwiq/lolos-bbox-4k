@@ -19,7 +19,11 @@ if [[ -z "${JAVA_HOME:-}" && -d "/Applications/Android Studio.app/Contents/jbr/C
   export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 fi
 [[ -n "${JAVA_HOME:-}" ]] && export PATH="$JAVA_HOME/bin:$PATH"
-VERSION="${VERSION:-1}"
+# Version de l'APK = version de l'installateur (app/src-tauri/tauri.conf.json) : 1.1.0 → 10100.
+# L'installateur compare ce numéro avec celui de la TV pour proposer la mise à jour de l'accueil.
+NOM_VERSION="$(grep -m1 '"version"' "$ICI/../app/src-tauri/tauri.conf.json" | sed -E 's/.*"([0-9]+)\.([0-9]+)\.([0-9]+)".*/\1.\2.\3/')"
+IFS=. read -r MAJ MIN COR <<< "$NOM_VERSION"
+VERSION="${VERSION:-$((MAJ * 10000 + MIN * 100 + COR))}"
 echo "SDK : $BT, $(basename "$(dirname "$PLATEFORME")")"
 
 B="$ICI/build"
@@ -28,7 +32,7 @@ rm -rf "$B" && mkdir -p "$B/gen" "$B/classes" "$B/dex"
 "$BT/aapt2" compile --dir "$ICI/res" -o "$B/res.zip"
 "$BT/aapt2" link -I "$PLATEFORME" --manifest "$ICI/AndroidManifest.xml" "$B/res.zip" \
   --java "$B/gen" --min-sdk-version 28 --target-sdk-version 30 \
-  --version-code "$VERSION" --version-name "1.$VERSION" -o "$B/base.apk"
+  --version-code "$VERSION" --version-name "$NOM_VERSION" -o "$B/base.apk"
 
 javac -nowarn --release 11 -classpath "$PLATEFORME" -d "$B/classes" \
   $(find "$ICI/src" "$B/gen" -name '*.java')
@@ -45,4 +49,5 @@ fi
 "$BT/zipalign" -f -p 4 "$B/base.apk" "$B/aligned.apk"
 "$BT/apksigner" sign --ks "$CLE" --ks-pass "pass:$MDP" --key-pass "pass:$MDP" \
   --out "$ICI/Accueil.apk" "$B/aligned.apk"
-echo "APK : $ICI/Accueil.apk ($(du -h "$ICI/Accueil.apk" | cut -f1))"
+printf '%s' "$VERSION" > "$ICI/Accueil.version"
+echo "APK : $ICI/Accueil.apk ($(du -h "$ICI/Accueil.apk" | cut -f1)), version $NOM_VERSION ($VERSION)"

@@ -1,6 +1,6 @@
 [package]
 name = "lolos"
-version = "1.0.0"
+version = "1.1.0"
 description = "Désencombre une Bbox 4K et installe un écran d'accueil minimal"
 edition = "2021"
 license = "MIT"
@@ -20,6 +20,7 @@ ureq = "3.5.0"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 base64 = "0.23.1"
 chrono = "0.4.45"
+tauri-plugin-updater = "2"
 
 [profile.release]
 codegen-units = 1

@@ -27,6 +27,7 @@ import java.util.Set;
 /** Applis lançables + tuiles spéciales vers l'interface Bbox (TV, programme, replay…). */
 final class Apps {
     static final String BBUI = "fr.bouyguestelecom.tv.bbui";
+    static final String POWER = "fr.bouyguestelecom.tv.power";
 
     /** Entrées techniques ou en double avec une tuile spéciale (« Réglages »). */
     private static final Set<String> HIDDEN = new HashSet<>(Arrays.asList(
@@ -83,6 +84,14 @@ final class Apps {
                             .setClassName(BBUI, BBUI + ".ui.pvr.PvrActivity")
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     0xFFD8432F, 0xFF5A120A));
+        }
+        // Alimentation : messages acceptés par le service système de la Bbox (traités dans MainActivity)
+        Intent power = new Intent().setClassName(POWER, POWER + ".PowerReceiver");
+        if (!pm.queryBroadcastReceivers(power, 0).isEmpty()) {
+            apps.add(special("@reboot", "Redémarrer", new Intent(power).setAction(POWER + ".REBOOT_QUIESCENT"),
+                    0xFF3F3F46, 0xFF18181B));
+            apps.add(special("@veille", "Mettre en veille", new Intent(power).setAction(POWER + ".GO_TO_SLEEP"),
+                    0xFF27272A, 0xFF09090B));
         }
         apps.add(special("@settings", "Réglages",
                 new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),

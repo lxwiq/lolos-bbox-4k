@@ -28,12 +28,13 @@ jobs:
       - name: Compilation
         env:
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
-          VERSION: ${{ github.run_number }}
         run: bash android/compiler.sh
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: android/Accueil.apk
+          path: |
+            android/Accueil.apk
+            android/Accueil.version
 
   installateur:
     name: Installateur ${{ matrix.nom }}
@@ -75,6 +76,9 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signature des mises à jour automatiques (latest.json + .sig)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
           tagName: ${{ github.event.release.tag_name }}

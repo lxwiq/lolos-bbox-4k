@@ -245,6 +245,13 @@ ol.pas b { color: var(--texte); font-weight: 600; }
 .points b { color: var(--texte); font-weight: 600; }
 .choix { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; cursor: pointer; }
 
+/* --- bandeaux de mise à jour --- */
+.bandeau {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  max-width: 820px; margin-bottom: 20px; padding: 10px 10px 10px 14px;
+  border: 1px solid var(--bord); border-radius: var(--rayon); background: var(--discret);
+}
+
 /* --- personnaliser --- */
 .champ { width: 100%; margin-top: 10px; }
 .perso-logo { display: flex; gap: 16px; align-items: center; margin-top: 14px; }

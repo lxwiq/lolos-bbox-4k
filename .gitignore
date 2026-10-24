@@ -1,6 +1,7 @@
 # Compilation
 android/build/
 android/Accueil.apk
+android/Accueil.version
 *.keystore
 app/node_modules/
 app/src-tauri/target/

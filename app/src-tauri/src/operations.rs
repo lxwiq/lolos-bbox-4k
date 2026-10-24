@@ -14,6 +14,12 @@ use std::time::Duration;
 /// Dépôt GitHub d'où viennent les fonds d'écran (fonds.zip de la dernière version).
 pub const DEPOT: &str = "lxwiq/lolos-bbox-4k";
 const APK: &[u8] = include_bytes!("../../../android/Accueil.apk");
+/// Numéro de version de l'APK embarqué (écrit par android/compiler.sh).
+const APK_VERSION: &str = include_str!("../../../android/Accueil.version");
+
+pub fn version_accueil_embarquee() -> u32 {
+    APK_VERSION.trim().parse().unwrap_or(0)
+}
 const DIRECT: &str = "am start -a android.intent.action.VIEW -d https://media.bbox.fr/channel/live \
                       -n fr.bouyguestelecom.tv.bbui/.ui.live.LiveActivity";
 
@@ -65,6 +71,9 @@ pub struct EtatTv {
     pub desactives: usize,
     pub accueil: String,
     pub accueil_installe: bool,
+    /// versionCode de l'accueil installé sur la TV, et celui que l'installateur peut installer
+    pub accueil_version: Option<u32>,
+    pub accueil_disponible: u32,
     pub eligibilite: String,
     pub dns_prive: String,
     pub sml_desactive: bool,
@@ -95,6 +104,11 @@ pub fn etat(tv: &Tv, profil: &Profil) -> Result<EtatTv, String> {
         desactives: desactives.len(),
         accueil: tv.accueil_actuel(),
         accueil_installe: installes.contains(&profil.accueil.paquet),
+        accueil_version: tv
+            .sh(&format!("dumpsys package {} | grep -m1 versionCode", profil.accueil.paquet))
+            .ok()
+            .and_then(|l| l.split_whitespace().find_map(|m| m.strip_prefix("versionCode=")?.parse().ok())),
+        accueil_disponible: version_accueil_embarquee(),
         eligibilite: tv.reglage("secure", "current_eligibility"),
         dns_prive: tv.reglage("global", "private_dns_mode"),
     })

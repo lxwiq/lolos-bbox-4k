@@ -72,7 +72,7 @@ public class MainActivity extends Activity {
 
     private int lastDockIndex;
     private int moving = -1;  // index de la tuile du dock en cours de déplacement
-    private boolean idle, swallowUp, resumedOnce, wallpaperPaused, rebuilding, tvWarm;
+    private boolean idle, swallowUp, resumedOnce, wallpaperPaused, rebuilding, tvWarm, auPremierPlan;
 
     private final Runnable goIdle = this::enterIdle;
     /** L'interface Bbox ignore la demande de direct tant qu'elle démarre : on la renvoie. */
@@ -83,6 +83,22 @@ public class MainActivity extends Activity {
         public void run() {
             wallpaper.next();
             handler.postDelayed(this, ROTATE_MS);
+        }
+    };
+    /** Après la veille, revenir devant si le service d'alimentation a relancé l'interface Bbox. */
+    private final Runnable revenirDevant = () -> {
+        if (!auPremierPlan) ramenerDevant();
+    };
+    private final BroadcastReceiver ecran = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            handler.removeCallbacks(revenirDevant);
+            if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
+                // Écran éteint : Lol'OS passe devant, pour être l'appli trouvée au réveil
+                if (!auPremierPlan) ramenerDevant();
+            } else {
+                handler.postDelayed(revenirDevant, 2500);
+            }
         }
     };
     private final BroadcastReceiver packagesChanged = new BroadcastReceiver() {
@@ -113,11 +129,24 @@ public class MainActivity extends Activity {
         filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         filter.addDataScheme("package");
         registerReceiver(packagesChanged, filter);
+
+        IntentFilter veille = new IntentFilter(Intent.ACTION_SCREEN_OFF);
+        veille.addAction(Intent.ACTION_SCREEN_ON);
+        registerReceiver(ecran, veille);
+    }
+
+    private void ramenerDevant() {
+        try {
+            startActivity(new Intent(this, MainActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT));
+        } catch (RuntimeException ignored) {
+        }
     }
 
     @Override
     protected void onDestroy() {
         unregisterReceiver(packagesChanged);
+        unregisterReceiver(ecran);
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -125,6 +154,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        auPremierPlan = true;
         handler.removeCallbacks(resendTv);
         wallpaperPaused = false;
         appliquerPersonnalisation();
@@ -137,6 +167,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        auPremierPlan = false;
         handler.removeCallbacks(rotate);
         handler.removeCallbacks(goIdle);
         wallpaper.stop();
@@ -512,6 +543,14 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- actions
 
     private void launch(TileView t) {
+        if ("@reboot".equals(t.entry.key)) {
+            confirmerRedemarrage(t.entry);
+            return;
+        }
+        if ("@veille".equals(t.entry.key)) {
+            sendBroadcast(t.entry.intent);
+            return;
+        }
         try {
             ActivityOptions anim = ActivityOptions.makeScaleUpAnimation(t, 0, 0, t.getWidth(), t.getHeight());
             startActivity(t.entry.intent, anim.toBundle());
@@ -532,6 +571,29 @@ public class MainActivity extends Activity {
         handler.postDelayed(resendTv, 7_000);
         handler.postDelayed(resendTv, 12_000);
         handler.postDelayed(resendTv, 18_000);
+    }
+
+    /**
+     * Redémarrage par le service d'alimentation de la Bbox (redémarrage « quiescent » : la box
+     * revient en veille). Si le message n'est plus accepté, on ouvre « À propos » des Réglages,
+     * qui contient « Redémarrer ».
+     */
+    private void confirmerRedemarrage(Apps.Entry entry) {
+        menu = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Redémarrer la box ?")
+                .setMessage("La box redémarre puis reste en veille : rallumez-la avec la télécommande.")
+                .setPositiveButton("Redémarrer", (d, w) -> {
+                    try {
+                        sendBroadcast(entry.intent);
+                        handler.postDelayed(() -> startActivity(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)), 4000);
+                    } catch (RuntimeException ex) {
+                        startActivity(new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    }
+                })
+                .setNegativeButton("Annuler", null)
+                .create();
+        menu.show();
     }
 
     private void launchKey(String key) {
