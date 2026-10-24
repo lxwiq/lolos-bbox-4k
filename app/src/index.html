@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lol'OS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="barre">
+    <div class="marque">
+      <img src="icone.png" alt="">
+      <div><strong>Lol'OS</strong><span>pour Bbox 4K</span></div>
+    </div>
+    <ol class="etapes" id="etapes">
+      <li data-etape="bienvenue">Bienvenue</li>
+      <li data-etape="outils">Outils Android</li>
+      <li data-etape="tv">Trouver la TV</li>
+      <li data-etape="sauvegarde">Sauvegarde</li>
+      <li data-etape="applis">Vos applis</li>
+      <li data-etape="accueil">Nouvel accueil</li>
+      <li data-etape="verification">Vérification</li>
+    </ol>
+    <button class="lien" data-aller="restauration">↺ Restaurer une sauvegarde</button>
+  </aside>
+
+  <main>
+    <!-- 1. Bienvenue -->
+    <section id="bienvenue" class="page">
+      <h1>Lol'OS, votre Bbox 4K en mieux</h1>
+      <p class="intro">Lol'OS transforme l'interface de votre décodeur <b>Bbox 4K</b> (Android TV) : plus rapide, sans pubs ni télémétrie, avec un écran d'accueil minimal façon Apple TV et des paysages animés.</p>
+      <div class="cartes">
+        <div class="carte"><span class="pastille">1</span><h3>Sauvegarde</h3><p>L'état de la TV est enregistré avant toute modification.</p></div>
+        <div class="carte"><span class="pastille">2</span><h3>Désencombrement</h3><p>Pubs, télémétrie et applis inutilisées sont <b>désactivées</b> — jamais désinstallées. Vous choisissez.</p></div>
+        <div class="carte"><span class="pastille">3</span><h3>Nouvel accueil</h3><p>Un dock de vos applis, la TV en direct en un clic, des paysages en fond.</p></div>
+      </div>
+      <div class="note">Les chaînes de télé, le guide, les enregistrements et la télécommande ne sont jamais touchés. Tout est réversible depuis « Restaurer ».</div>
+      <div class="actions"><button class="principal" data-aller="outils">Commencer</button></div>
+    </section>
+
+    <!-- 2. Outils -->
+    <section id="outils" class="page">
+      <h1>Outils Android (adb)</h1>
+      <p class="intro">L'installateur parle à la TV avec <b>adb</b>, l'outil officiel de Google.</p>
+      <div id="adb-statut" class="statut">Recherche d'adb…</div>
+      <div id="adb-absent" class="cache">
+        <div class="carte large">
+          <h3>Installation automatique (recommandée)</h3>
+          <p>Télécharge les « platform-tools » officiels de Google (~7 Mo) dans le dossier de l'appli. Aucun droit administrateur nécessaire.</p>
+          <button class="principal" id="adb-installer">Installer adb automatiquement</button>
+        </div>
+        <details class="carte large">
+          <summary>Ou l'installer vous-même</summary>
+          <div id="adb-manuel"></div>
+        </details>
+      </div>
+      <div class="actions"><button data-aller="bienvenue">Retour</button><button class="principal" id="outils-suivant" data-aller="tv" disabled>Continuer</button></div>
+    </section>
+
+    <!-- 3. TV -->
+    <section id="tv" class="page">
+      <h1>Trouver la TV</h1>
+      <p class="intro">La TV et cet ordinateur doivent être sur le même réseau (Wi-Fi ou câble).</p>
+      <div class="ligne">
+        <button id="tv-chercher">Rechercher sur le réseau</button>
+        <span class="ou">ou</span>
+        <input id="tv-ip" placeholder="Adresse IP, ex. 192.168.1.20" spellcheck="false">
+        <button class="principal" id="tv-connecter">Se connecter</button>
+        <button id="tv-diagnostic" title="Teste l'adresse saisie et affiche le résultat dans le journal">Diagnostic réseau</button>
+      </div>
+      <ul id="tv-liste" class="liste"></ul>
+      <div id="tv-statut" class="statut cache"></div>
+      <details class="carte large" id="tv-aide">
+        <summary>Activer le débogage sur la TV (une seule fois)</summary>
+        <ol class="pas">
+          <li>Sur la TV : <b>Paramètres</b> → <b>Préférences de l'appareil</b> → <b>À propos</b>.</li>
+          <li>Descendez sur <b>Build</b> et appuyez <b>7 fois sur OK</b> (« Vous êtes maintenant développeur »).</li>
+          <li>Retour → <b>Options pour les développeurs</b> → activez <b>Débogage USB</b> (et <b>Débogage réseau</b> s'il existe).</li>
+          <li>À la connexion, la TV demande « Autoriser le débogage ? » : cochez <b>Toujours autoriser</b> puis <b>OK</b>.</li>
+        </ol>
+      </details>
+      <div class="actions"><button data-aller="outils">Retour</button><button class="principal" id="tv-suivant" data-aller="sauvegarde" disabled>Continuer</button></div>
+    </section>
+
+    <!-- 4. Sauvegarde -->
+    <section id="sauvegarde" class="page">
+      <h1>Sauvegarde</h1>
+      <p class="intro">On enregistre l'état actuel de la TV (applis actives, réglages, écran d'accueil) pour pouvoir tout remettre comme avant.</p>
+      <div id="tv-infos" class="infos"></div>
+      <div id="sauv-statut" class="statut cache"></div>
+      <div class="actions"><button data-aller="tv">Retour</button><button class="principal" id="sauv-faire">Sauvegarder et continuer</button></div>
+    </section>
+
+    <!-- 5. Applis -->
+    <section id="applis" class="page">
+      <h1>Vos applis</h1>
+      <p class="intro">Cochez ce qui doit être <b>désactivé</b>. Une appli désactivée disparaît et ne tourne plus en arrière-plan ; elle se réactive en un clic depuis « Restaurer ».</p>
+      <div id="avertissements"></div>
+      <div id="categories"></div>
+      <details class="carte large"><summary>Jamais touchés (chaînes, système)</summary><p id="proteges" class="petit"></p></details>
+      <div class="actions">
+        <button data-aller="sauvegarde">Retour</button>
+        <span class="resume" id="applis-resume"></span>
+        <button id="applis-simuler">Voir ce qui sera fait</button>
+        <button class="principal" id="applis-appliquer">Désactiver</button>
+      </div>
+    </section>
+
+    <!-- 6. Accueil -->
+    <section id="accueil" class="page">
+      <h1>Nouvel écran d'accueil</h1>
+      <div class="apercu">
+        <div class="apercu-ecran">
+          <div class="apercu-heure">20:45</div>
+          <div class="apercu-dock"><i class="tv">TV</i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <ul class="points">
+          <li><b>Dock</b> de vos applis favorites, grandes tuiles, zoom au survol.</li>
+          <li><b>TV en direct</b> en un clic (plus d'écran de recommandations Bouygues).</li>
+          <li><b>Flèche bas</b> : toutes les applis. <b>Appui long sur OK</b> : déplacer, retirer, ajouter.</li>
+          <li><b>Paysages animés</b> (forêt, cascade, océan, nuages, rivière, aurore) et écran de veille assorti.</li>
+        </ul>
+      </div>
+      <label class="choix"><input type="checkbox" id="acc-fonds" checked> Installer les paysages animés (téléchargement ≈ 110 Mo, une seule fois)</label>
+      <div class="actions"><button data-aller="applis">Retour</button><button data-aller="verification">Passer</button><button class="principal" id="acc-installer">Installer l'accueil</button></div>
+    </section>
+
+    <!-- 7. Vérification -->
+    <section id="verification" class="page">
+      <h1>Vérification</h1>
+      <div class="ligne"><button id="verif-capture">Capture de la TV</button><button id="verif-direct">Tester la TV en direct</button></div>
+      <div id="verif-resultats" class="infos"></div>
+      <img id="verif-image" class="capture cache" alt="Capture de l'écran de la TV">
+      <p class="petit">La vidéo des chaînes passe par un circuit protégé : sur une capture, le direct apparaît <b>noir</b>, c'est normal. Le test mesure le flux reçu à la place.</p>
+      <div class="actions"><button data-aller="accueil">Retour</button><button class="principal" data-aller="bienvenue">Terminé</button></div>
+    </section>
+
+    <!-- Restauration -->
+    <section id="restauration" class="page">
+      <h1>Restaurer une sauvegarde</h1>
+      <p class="intro">Remet la TV exactement dans l'état d'une sauvegarde : applis, réglages et accueil Bbox d'origine.</p>
+      <ul id="rest-liste" class="liste"></ul>
+      <label class="choix"><input type="checkbox" id="rest-usine"> Réactiver aussi les applis déjà désactivées au moment de la sauvegarde (tout réactiver)</label>
+      <label class="choix"><input type="checkbox" id="rest-garder"> Garder l'écran d'accueil « Accueil » installé (sans le mettre par défaut)</label>
+      <div class="actions"><button data-aller="bienvenue">Retour</button><button class="danger" id="rest-lancer" disabled>Restaurer</button></div>
+    </section>
+
+    <div id="journal" class="journal">
+      <button class="journal-barre" id="journal-bascule" aria-expanded="false" title="Afficher le journal en direct">
+        <span class="journal-titre">Journal</span>
+        <span class="journal-dernier" id="journal-dernier">Prêt.</span>
+        <span class="badge" id="journal-compte">0</span>
+        <span class="chevron" aria-hidden="true">▴</span>
+      </button>
+      <div class="journal-corps">
+        <div class="journal-outils">
+          <label class="choix"><input type="checkbox" id="journal-details" checked> Commandes adb et réponses</label>
+          <span class="petit" id="journal-fichier"></span>
+          <button id="journal-copier">Copier</button>
+          <button id="journal-vider">Vider</button>
+        </div>
+        <div id="journal-lignes" class="journal-lignes" role="log" aria-live="polite"></div>
+      </div>
+    </div>
+  </main>
+  <script src="main.js"></script>
+</body>
+</html>

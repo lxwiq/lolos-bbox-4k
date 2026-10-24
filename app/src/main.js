@@ -1,0 +1,432 @@
+const { listen } = window.__TAURI__.event;
+
+const $ = (s) => document.querySelector(s);
+const etat = { profil: null, connecte: false, sauvegarde: null, recherche: false };
+
+// ------------------------------------------------------------------ navigation
+
+const entrees = {
+  outils: verifierAdb,
+  tv: () => { if (!etat.recherche) chercher(); },
+  sauvegarde: afficherTv,
+  applis: chargerApplis,
+  verification: verifier,
+  restauration: listerSauvegardes,
+};
+
+function aller(id) {
+  document.querySelectorAll(".page").forEach((p) => p.classList.toggle("visible", p.id === id));
+  document.querySelectorAll("#etapes li").forEach((li) => li.classList.toggle("active", li.dataset.etape === id));
+  document.querySelector("main").scrollTop = 0;
+  entrees[id]?.();
+}
+
+function faite(id) {
+  document.querySelector(`#etapes li[data-etape="${id}"]`)?.classList.add("faite");
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-aller]");
+  if (b && !b.disabled) aller(b.dataset.aller);
+});
+
+// ------------------------------------------------------------------ journal en direct
+
+const lignes = [];
+const NIVEAUX = { cmd: "cmd", out: "rép.", err: "err.", info: "info", ui: "appli" };
+
+function heure() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0");
+}
+
+function ajouterLigne({ heure, niveau, texte }) {
+  lignes.push(`${heure} [${niveau}] ${texte}`);
+  const div = document.createElement("div");
+  div.className = "trace " + niveau;
+  const [h, n, t] = ["h", "n", "t"].map((c) => Object.assign(document.createElement("span"), { className: c }));
+  h.textContent = heure;
+  n.textContent = NIVEAUX[niveau] || niveau;
+  t.textContent = texte;
+  div.append(h, n, t);
+  const zone = $("#journal-lignes");
+  const enBas = zone.scrollHeight - zone.scrollTop - zone.clientHeight < 40;
+  zone.append(div);
+  if (enBas) zone.scrollTop = zone.scrollHeight;
+  $("#journal-compte").textContent = lignes.length;
+  if (niveau === "err") $("#journal-dernier").textContent = "⚠️ " + texte.split("\n")[0];
+}
+
+/** Message de l'interface : barre du journal + journal détaillé. */
+function journal(texte) {
+  $("#journal-dernier").textContent = texte.split("\n")[0];
+  ajouterLigne({ heure: heure(), niveau: "ui", texte });
+}
+
+listen("journal", (e) => ($("#journal-dernier").textContent = e.payload));
+listen("log", (e) => ajouterLigne(e.payload));
+
+/** Appel au backend, tracé dans le journal. */
+async function invoke(commande, args) {
+  const resume = args ? " " + JSON.stringify(args).slice(0, 160) : "";
+  ajouterLigne({ heure: heure(), niveau: "ui", texte: "→ " + commande + resume });
+  try {
+    return await window.__TAURI__.core.invoke(commande, args);
+  } catch (err) {
+    ajouterLigne({ heure: heure(), niveau: "err", texte: commande + " : " + err });
+    throw err;
+  }
+}
+
+$("#journal-bascule").addEventListener("click", async () => {
+  const j = $("#journal");
+  const ouvert = j.classList.toggle("ouvert");
+  $("#journal-bascule").setAttribute("aria-expanded", ouvert);
+  if (ouvert) {
+    const zone = $("#journal-lignes");
+    zone.scrollTop = zone.scrollHeight;
+    if (!$("#journal-fichier").textContent) {
+      $("#journal-fichier").textContent = "Fichier : " + (await window.__TAURI__.core.invoke("dossier_donnees")) + "/journal.txt";
+    }
+  }
+});
+$("#journal-details").addEventListener("change", (e) => $("#journal-lignes").classList.toggle("sans-details", !e.target.checked));
+$("#journal-copier").addEventListener("click", (e) =>
+  navigator.clipboard?.writeText(lignes.join("\n")).then(() => (e.target.textContent = "Copié ✓"))
+);
+$("#journal-vider").addEventListener("click", () => {
+  lignes.length = 0;
+  $("#journal-lignes").textContent = "";
+  $("#journal-compte").textContent = "0";
+});
+
+// ------------------------------------------------------------------ utilitaires
+
+function statut(el, texte, genre = "") {
+  el.classList.remove("cache", "ok", "erreur", "attente");
+  if (genre) el.classList.add(genre);
+  el.textContent = texte;
+}
+
+async function occupe(bouton, travail) {
+  bouton.disabled = true;
+  try { return await travail(); } finally { bouton.disabled = false; }
+}
+
+function echapper(t) {
+  return String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ------------------------------------------------------------------ 2. adb
+
+const INSTALL_MANUELLE = {
+  macos: [["Avec Homebrew", "brew install --cask android-platform-tools"]],
+  windows: [["Avec winget (Windows 10/11)", "winget install Google.PlatformTools"]],
+  linux: [
+    ["Debian, Ubuntu, Mint", "sudo apt install adb"],
+    ["Fedora", "sudo dnf install android-tools"],
+    ["Arch, Manjaro", "sudo pacman -S android-tools"],
+  ],
+};
+
+async function verifierAdb() {
+  const el = $("#adb-statut");
+  statut(el, "Recherche d'adb…", "attente");
+  const r = await invoke("etat_adb");
+  if (r.trouve) {
+    statut(el, `✓ adb trouvé : ${r.chemin}${r.version ? " — " + r.version : ""}`, "ok");
+    $("#adb-absent").classList.add("cache");
+    $("#outils-suivant").disabled = false;
+    faite("outils");
+    return;
+  }
+  statut(el, "adb n'est pas installé sur cet ordinateur.", "erreur");
+  const lignes = (INSTALL_MANUELLE[r.systeme] || INSTALL_MANUELLE.linux)
+    .map(([titre, cmd]) => `<p>${titre} :</p><div class="commande"><code>${cmd}</code><button data-copier="${cmd}">Copier</button></div>`)
+    .join("");
+  $("#adb-manuel").innerHTML = `${lignes}
+    <p>Ou téléchargez les « SDK Platform-Tools » sur
+    <code>developer.android.com/tools/releases/platform-tools</code>, décompressez-les et ajoutez le dossier au PATH.</p>
+    <p><button id="adb-reverifier">J'ai installé adb, revérifier</button></p>`;
+  $("#adb-absent").classList.remove("cache");
+}
+
+document.addEventListener("click", (e) => {
+  const c = e.target.closest("[data-copier]");
+  if (c) navigator.clipboard?.writeText(c.dataset.copier).then(() => (c.textContent = "Copié ✓"));
+  if (e.target.id === "adb-reverifier") verifierAdb();
+});
+
+$("#adb-installer").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    statut($("#adb-statut"), "Téléchargement des outils officiels Google…", "attente");
+    try {
+      await invoke("installer_adb");
+      await verifierAdb();
+    } catch (err) {
+      statut($("#adb-statut"), "Échec du téléchargement : " + err + " — utilisez l'installation manuelle.", "erreur");
+    }
+  })
+);
+
+// ------------------------------------------------------------------ 3. TV
+
+async function chercher() {
+  if (etat.enRecherche) return;
+  etat.recherche = etat.enRecherche = true;
+  const el = $("#tv-statut");
+  statut(el, "Recherche des TV sur le réseau (≈ 20 s)…", "attente");
+  $("#tv-liste").innerHTML = "";
+  let r;
+  try { r = await invoke("chercher_tv"); } finally { etat.enRecherche = false; }
+  const tvs = r.tvs;
+  if (!tvs.length) {
+    statut(el, `Aucune TV trouvée sur le réseau ${r.reseau}. Vérifiez qu'elle est allumée (pas en veille) et sur le même ` +
+      "réseau que cet ordinateur (attention aux VPN), ou saisissez son adresse IP.", "erreur");
+    return;
+  }
+  el.classList.add("cache");
+  for (const tv of tvs) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span><b>${echapper(tv.ip)}</b> <span class="petit">${tv.cast ? "Android TV / Chromecast" : "Android TV"}</span></span>
+      <span class="badge ${tv.adb ? "ok" : "non"}">${tv.adb ? "débogage actif" : "débogage à activer"}</span>`;
+    li.addEventListener("click", () => {
+      document.querySelectorAll("#tv-liste li").forEach((x) => x.classList.remove("choisi"));
+      li.classList.add("choisi");
+      $("#tv-ip").value = tv.ip;
+      if (!tv.adb) $("#tv-aide").open = true;
+    });
+    $("#tv-liste").append(li);
+  }
+  if (tvs.length === 1) $("#tv-liste li").click();
+}
+
+$("#tv-chercher").addEventListener("click", (e) => occupe(e.target, chercher));
+
+$("#tv-connecter").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    const ip = $("#tv-ip").value.trim();
+    const el = $("#tv-statut");
+    if (!ip) return statut(el, "Choisissez une TV ou saisissez son adresse IP.", "erreur");
+    statut(el, "Connexion…", "attente");
+    try {
+      let s = await invoke("connecter", { ip });
+      for (let i = 0; s === "unauthorized" && i < 30; i++) {
+        statut(el, "Sur la TV : cochez « Toujours autoriser » puis OK dans « Autoriser le débogage ? »", "attente");
+        await new Promise((r) => setTimeout(r, 2000));
+        s = await invoke("statut_connexion");
+      }
+      if (s !== "device") throw new Error(s === "unauthorized" ? "autorisation non accordée sur la TV" : "TV injoignable (" + s + ")");
+      localStorage.setItem("ip", ip);
+      etat.connecte = true;
+      statut(el, "✓ Connecté à la TV " + ip, "ok");
+      $("#tv-suivant").disabled = false;
+      faite("tv");
+    } catch (err) {
+      statut(el, "Connexion impossible : " + (err.message || err), "erreur");
+      $("#tv-aide").open = true;
+    }
+  })
+);
+
+$("#tv-diagnostic").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    const ip = $("#tv-ip").value.trim();
+    if (!ip) return statut($("#tv-statut"), "Saisissez l'adresse IP de la TV pour la diagnostiquer.", "erreur");
+    journal("— Diagnostic réseau " + ip + " —\n" + (await invoke("diagnostic_reseau", { ip })));
+  })
+);
+
+try { $("#tv-ip").value = localStorage.getItem("ip") || ""; } catch {}
+
+// ------------------------------------------------------------------ 4. sauvegarde
+
+function carteInfo(titre, valeur, ok) {
+  const cls = ok === undefined ? "" : ok ? "ok" : "ko";
+  return `<div class="info ${cls}"><small>${titre}</small>${echapper(valeur)}</div>`;
+}
+
+async function afficherTv() {
+  if (!etat.connecte) return statut($("#sauv-statut"), "Connectez d'abord la TV (étape précédente).", "erreur");
+  const t = await invoke("etat_tv");
+  $("#tv-infos").innerHTML =
+    carteInfo("Modèle", `${t.modele} — Android ${t.android}`, t.est_bbox) +
+    carteInfo("Mémoire disponible", `${t.memoire_dispo_mo} Mo`) +
+    carteInfo("Applis désactivées", t.desactives) +
+    carteInfo("Écran d'accueil", t.accueil.split("/")[0]);
+  if (!t.est_bbox) {
+    statut($("#sauv-statut"), "⚠️ Cette TV ne semble pas être une Bbox 4K : le profil est prévu pour elle. Continuez seulement si vous savez ce que vous faites.", "erreur");
+  }
+}
+
+$("#sauv-faire").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    const el = $("#sauv-statut");
+    if (!etat.connecte) return statut(el, "Connectez d'abord la TV.", "erreur");
+    statut(el, "Sauvegarde en cours…", "attente");
+    try {
+      etat.sauvegarde = await invoke("sauvegarder");
+      statut(el, "✓ Sauvegardé dans " + etat.sauvegarde, "ok");
+      journal("Sauvegarde : " + etat.sauvegarde);
+      faite("sauvegarde");
+      aller("applis");
+    } catch (err) {
+      statut(el, "Échec de la sauvegarde : " + err, "erreur");
+    }
+  })
+);
+
+// ------------------------------------------------------------------ 5. applis
+
+async function chargerApplis() {
+  if (!etat.connecte) return;
+  etat.profil ??= await invoke("profil");
+  const p = etat.profil;
+  const paquets = await invoke("paquets");
+  $("#avertissements").innerHTML = p.avertissements.map((a) => `<div class="avertissement">${echapper(a)}</div>`).join("");
+  $("#proteges").textContent = p.proteges.paquets.join(", ");
+  $("#categories").innerHTML = "";
+  for (const cat of p.categories) {
+    const liste = paquets.filter((x) => x.categorie === cat.id && x.present && !x.cache);
+    if (!liste.length) continue;
+    const bloc = document.createElement("div");
+    bloc.className = "carte categorie";
+    bloc.innerHTML = `<header><h3>${echapper(cat.titre)}</h3><p>${echapper(cat.description)}</p></header><div class="paquets"></div>`;
+    for (const x of liste) {
+      const coche = x.desactive || x.defaut === "desactiver";
+      const label = document.createElement("label");
+      label.className = "paquet" + (x.desactive ? " deja" : "");
+      label.title = x.note || "";
+      label.innerHTML = `<input type="checkbox" value="${x.id}" ${coche ? "checked" : ""} ${x.desactive ? "disabled" : ""}>
+        <span><span>${echapper(x.nom)}</span><small>${echapper(x.note || x.id)}</small></span>`;
+      bloc.querySelector(".paquets").append(label);
+    }
+    $("#categories").append(bloc);
+  }
+  resume();
+}
+
+function choisis() {
+  return [...document.querySelectorAll("#categories input:checked:not(:disabled)")].map((i) => i.value);
+}
+
+function resume() {
+  const n = choisis().length;
+  $("#applis-resume").textContent = n ? `${n} appli${n > 1 ? "s" : ""} à désactiver` : "Rien de nouveau à désactiver";
+}
+$("#categories").addEventListener("change", resume);
+
+$("#applis-simuler").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    journal("— Ce qui sera fait —");
+    await invoke("appliquer", { desactiver: choisis(), simulation: true });
+  })
+);
+
+$("#applis-appliquer").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    if (!etat.sauvegarde) {
+      journal("⚠️ Faites d'abord la sauvegarde (étape 4).");
+      return aller("sauvegarde");
+    }
+    try {
+      const n = await invoke("appliquer", { desactiver: choisis(), simulation: false });
+      journal(`✓ ${n} appli(s) désactivée(s)`);
+      faite("applis");
+      aller("accueil");
+    } catch (err) {
+      journal("Erreur : " + err);
+    }
+  })
+);
+
+// ------------------------------------------------------------------ 6. accueil
+
+$("#acc-installer").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    try {
+      await invoke("installer_accueil", { fonds: $("#acc-fonds").checked });
+      faite("accueil");
+      aller("verification");
+    } catch (err) {
+      journal("Erreur : " + err);
+    }
+  })
+);
+
+// ------------------------------------------------------------------ 7. vérification
+
+async function verifier() {
+  if (!etat.connecte) return;
+  const t = await invoke("etat_tv");
+  const accueilOk = t.accueil.startsWith("fr.accueil.tv");
+  const eligible = /(SD|HD)=true/.test(t.eligibilite);
+  $("#verif-resultats").innerHTML =
+    carteInfo("Télémétrie SML", t.sml_desactive ? "désactivée" : "active", t.sml_desactive) +
+    carteInfo("Écran d'accueil", accueilOk ? "Accueil (nouveau)" : t.accueil.split("/")[0], accueilOk) +
+    carteInfo("TV éligible", eligible ? "oui" : "non — redémarrez la box", eligible) +
+    carteInfo("DNS privé", t.dns_prive === "hostname" ? "ACTIF — à retirer" : "non", t.dns_prive !== "hostname") +
+    carteInfo("Mémoire disponible", `${t.memoire_dispo_mo} Mo`);
+  if (accueilOk && t.sml_desactive) faite("verification");
+}
+
+$("#verif-capture").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    const img = $("#verif-image");
+    img.src = await invoke("capture");
+    img.classList.remove("cache");
+  })
+);
+
+$("#verif-direct").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    journal("Test du direct (≈ 20 s)…");
+    const kbits = await invoke("tester_direct");
+    const ok = kbits > 2000;
+    journal(ok ? `✓ La TV en direct fonctionne (${Math.round(kbits / 100) / 10} Mbit/s reçus)` : `❌ Pas de flux TV (${kbits} kbit/s)`);
+    $("#verif-resultats").insertAdjacentHTML("beforeend", carteInfo("TV en direct", ok ? `${Math.round(kbits / 100) / 10} Mbit/s` : "aucun flux", ok));
+  })
+);
+
+// ------------------------------------------------------------------ restauration
+
+let choixSauvegarde = null;
+
+async function listerSauvegardes() {
+  const liste = await invoke("sauvegardes");
+  const ul = $("#rest-liste");
+  ul.innerHTML = liste.length ? "" : `<li>Aucune sauvegarde dans ${echapper(await invoke("dossier_donnees"))}</li>`;
+  for (const chemin of liste) {
+    const li = document.createElement("li");
+    const nom = chemin.split(/[\\/]/).pop();
+    li.innerHTML = `<span><b>${echapper(nom.replace("_", " à ").replace(/(\d\d)(\d\d)(\d\d)$/, "$1:$2:$3"))}</b></span><span class="petit">${echapper(chemin)}</span>`;
+    li.addEventListener("click", () => {
+      ul.querySelectorAll("li").forEach((x) => x.classList.remove("choisi"));
+      li.classList.add("choisi");
+      choixSauvegarde = chemin;
+      $("#rest-lancer").disabled = false;
+    });
+    ul.append(li);
+  }
+}
+
+$("#rest-lancer").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    if (!etat.connecte) {
+      journal("⚠️ Connectez d'abord la TV (étape « Trouver la TV »).");
+      return aller("tv");
+    }
+    try {
+      await invoke("restaurer", {
+        sauvegarde: choixSauvegarde,
+        usine: $("#rest-usine").checked,
+        garderAccueil: $("#rest-garder").checked,
+      });
+      journal("✓ Restauration terminée.");
+    } catch (err) {
+      journal("Erreur : " + err);
+    }
+  })
+);
+
+aller("bienvenue");

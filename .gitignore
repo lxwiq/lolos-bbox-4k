@@ -1,0 +1,18 @@
+# Compilation
+android/build/
+android/Accueil.apk
+*.keystore
+app/node_modules/
+app/src-tauri/target/
+app/src-tauri/gen/
+
+# Données personnelles / volumineuses
+fonds/*.mp4
+fonds.zip
+/sauvegardes/
+journal.txt
+/captures/
+
+.DS_Store
+__pycache__/
+*.pyc

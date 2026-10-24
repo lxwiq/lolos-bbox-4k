@@ -1,0 +1,98 @@
+# Compile l'APK du lanceur et l'installateur pour Windows, macOS et Linux,
+# puis les attache à la version GitHub publiée.
+name: Exécutables
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Lanceur Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Clé de signature
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > android/accueil.keystore; fi
+      - name: Compilation
+        env:
+          KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          VERSION: ${{ github.run_number }}
+        run: bash android/compiler.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: android/Accueil.apk
+
+  installateur:
+    name: Installateur ${{ matrix.nom }}
+    needs: apk
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nom: macOS
+            os: macos-latest
+            args: --target universal-apple-darwin
+          - nom: Windows
+            os: windows-latest
+            args: ""
+          - nom: Linux
+            os: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: android
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Dépendances Linux
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: CLI Tauri
+        working-directory: app
+        run: npm install
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.event.release.tag_name }}
+          releaseId: ${{ github.event.release.id }}
+          args: ${{ matrix.args }}
+
+  extras:
+    name: APK et CLI dans la version
+    needs: [apk, installateur]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: android
+      - name: Envoi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.release.tag_name }}" android/Accueil.apk cli/lolos.py --clobber

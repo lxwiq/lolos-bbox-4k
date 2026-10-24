@@ -1,0 +1,64 @@
+Fonds d'écran vidéo animés — crédits et licences
+=================================================
+
+Toutes les vidéos proviennent de Wikimedia Commons (https://commons.wikimedia.org)
+et sont publiées sous licence libre (CC BY) ou dans le domaine public.
+Aucune n'est sous licence CC BY-SA : il n'y a donc pas d'obligation de partage
+à l'identique sur les fichiers dérivés.
+
+Modifications communes à tous les fichiers :
+  recadré, raccourci, boucle fondue
+  (recadrage/mise à l'échelle en 1920x1080 16:9 sans bandes noires,
+   extrait de 30 à 34 s, fondu enchaîné d'environ 1,5 s entre la fin et le début
+   pour une lecture en boucle sans saut, piste audio supprimée,
+   ré-encodage H.264 High@4.0 yuv420p)
+
+
+01-foret.mp4
+  Titre       : Zeitraffer im Wald bei Hof 20241116
+  Auteur      : PantheraLeo1359531
+  Licence     : CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+  Page Commons: https://commons.wikimedia.org/wiki/File:Zeitraffer_im_Wald_bei_Hof_20241116.webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (source 4752x3168 réduite et recadrée en 16:9, 31,5 s)
+
+02-cascade.mp4
+  Titre       : Dark Hollow upper falls Shenandoah NP VA 2024-10-11 08-33-31 1
+  Auteur      : G. Edward Johnson (utilisateur Commons : Lorax)
+  Licence     : CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+  Page Commons: https://commons.wikimedia.org/wiki/File:Dark_Hollow_upper_falls_Shenandoah_NP_VA_2024-10-11_08-33-31_1.webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (source 8K réduite en 1080p, 29,97 -> 30 i/s, 32 s)
+
+03-ocean.mp4
+  Titre       : Waves waving at Apollo Beach (Canaveral National Seashore, Florida, GEDC7077)
+  Auteur      : Trougnouf
+  Licence     : CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+  Page Commons: https://commons.wikimedia.org/wiki/File:Waves_waving_at_Apollo_Beach_(Canaveral_National_Seashore,_Florida,_GEDC7077).webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (extrait à partir de 3 min 03 s, 29,97 -> 30 i/s, 34 s)
+
+04-nuages.mp4
+  Titre       : Wolken Zeitraffer - Clouds Timelapse 4K HD 24FPS
+  Auteur      : FreeSwissVideo (https://www.youtube.com/user/FreeSwissVideo)
+  Licence     : CC BY 3.0 — https://creativecommons.org/licenses/by/3.0/
+  Page Commons: https://commons.wikimedia.org/wiki/File:Wolken_Zeitraffer_-_Clouds_Timelapse_4K_HD_24FPS.webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (24 -> 25 i/s, soit une accélération de 4 %, 32 s)
+
+05-riviere.mp4
+  Titre       : Little Applegate River (50857222626)
+  Auteur      : BLM Oregon & Washington (photo/vidéo : Kyle Sullivan, Bureau of Land Management)
+  Licence     : Domaine public (œuvre du gouvernement fédéral des États-Unis)
+  Page Commons: https://commons.wikimedia.org/wiki/File:Little_Applegate_River_(50857222626).webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (extrait à partir de 8 s, 32 s)
+
+06-aurore.mp4
+  Titre       : Aurora reflection October
+  Auteur      : Andrea Girones (https://www.flickr.com/photos/198200988@N02/)
+  Licence     : CC BY 2.0 — https://creativecommons.org/licenses/by/2.0/
+  Page Commons: https://commons.wikimedia.org/wiki/File:Aurora_reflection_October.webm
+  Modifications : recadré, raccourci, boucle fondue
+                  (fondu au noir final de la source retiré, 29,97 -> 30 i/s,
+                   fondu de boucle de 1,8 s, 30 s)
