@@ -31,6 +31,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -1661,6 +1662,70 @@ def cmd_capture(args):
     return 0
 
 
+# ---- personnaliser / redemarrer ----
+
+def cmd_personnaliser(args):
+    """Message d'accueil et écran de démarrage de Lol'OS, lus par le lanceur sur la TV."""
+    profil = charger_profil(getattr(args, "profil", None))
+    acc = profil.accueil
+    paquet = acc.get("paquet", "fr.accueil.tv")
+    distant = "/sdcard/Android/data/%s/files" % paquet
+    reglages = {"salutation": (args.message or "").strip(), "demarrage": not args.sans_demarrage,
+                "message_demarrage": (args.message_demarrage or "").strip(), "duree_demarrage_ms": 2500}
+    logo = Path(args.logo).expanduser() if args.logo else None
+    if logo:
+        if not logo.is_file():
+            raise Erreur("Image introuvable : %s" % logo)
+        if logo.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            raise Erreur("Image PNG, JPEG ou WebP attendue (exportez d'abord un SVG en PNG).")
+        if logo.stat().st_size > 3e6:
+            info("⚠️ Image lourde (%.1f Mo) : une image de moins de 1000 px suffit." % (logo.stat().st_size / 1e6))
+    if args.simulation:
+        info("Personnalisation (simulation, rien ne sera modifié) :")
+        info("  • %s/personnalisation.json ← %s" % (distant, json.dumps(reglages, ensure_ascii=False)))
+        if logo:
+            info("  • %s/logo-demarrage.png ← %s" % (distant, logo))
+        elif args.logo_lolos:
+            info("  • suppression de %s/logo-demarrage.png (retour au logo Lol'OS)" % distant)
+        return 0
+    adb = appareil(args)
+    adb.sh("mkdir", "-p", distant)
+    with tempfile.TemporaryDirectory() as dossier:  # dossier privé, pas un fichier fixe dans /tmp
+        fichier = Path(dossier) / "personnalisation.json"
+        fichier.write_text(json.dumps(reglages, ensure_ascii=False, indent=2), encoding="utf-8")
+        r = adb.lancer(["push", str(fichier), distant + "/personnalisation.json"], 60)
+        if r.code != 0:
+            raise Erreur("Envoi impossible : %s" % (r.sortie + r.erreur).strip())
+    journaliser("personnalisation : %s" % json.dumps(reglages, ensure_ascii=False))
+    if logo:
+        r = adb.lancer(["push", str(logo), distant + "/logo-demarrage.png"], 120)
+        if r.code != 0:
+            raise Erreur("Envoi de l'image impossible : %s" % (r.sortie + r.erreur).strip())
+        journaliser("logo de démarrage : %s" % logo.name)
+    elif args.logo_lolos:
+        adb.sh("rm", "-f", distant + "/logo-demarrage.png")
+        journaliser("logo de démarrage : retour au logo Lol'OS")
+    info("✅ Personnalisation envoyée (appliquée au prochain retour à l'accueil).")
+    if args.apercu:
+        adb.sh("am", "start", "-n", acc.get("activite", paquet + "/.MainActivity"),
+               "--ez", "fr.accueil.tv.APERCU_DEMARRAGE", "true")
+        info("  Aperçu de l'écran de démarrage affiché sur la TV.")
+    return 0
+
+
+def cmd_redemarrer(args):
+    adb = appareil(args)
+    confirmer(args, "Redémarrer la box maintenant ?")
+    journaliser("adb reboot (%s)" % adb.serie)
+    try:
+        subprocess.run([adb.chemin, "-s", adb.serie, "reboot"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=8)
+    except subprocess.TimeoutExpired:
+        pass  # adb attend que la TV disparaisse du réseau : elle redémarre déjà
+    info("✅ La box redémarre (environ 1 minute). Ensuite :  python3 lolos.py connecter")
+    return 0
+
+
 # ---- verifier ----
 
 def mesurer_debit(adb, duree=3):
@@ -1927,6 +1992,22 @@ def construire_parseur():
                     help="lancer le direct TV, mesurer le débit reçu puis revenir à l'accueil (visible sur la TV)")
     sp.add_argument("--attente", type=int, default=10, metavar="S", help="secondes d'attente avant la mesure (défaut : 10)")
     sp.set_defaults(fonction=cmd_verifier)
+
+    sp = commande("personnaliser", "message d'accueil et écran de démarrage de Lol'OS",
+                  "Message affiché sur l'accueil ({moment} devient Bonjour / Bon après-midi / Bonsoir) et écran "
+                  "de démarrage (logo + message) montré quand la box s'allume. Rien n'est installé : deux fichiers "
+                  "sont déposés dans le dossier de Lol'OS sur la TV.")
+    sp.add_argument("--message", metavar="TEXTE", help="message d'accueil, ex. \"{moment} Lolo\" (vide = aucun)")
+    sp.add_argument("--message-demarrage", metavar="TEXTE", help="message de l'écran de démarrage (facultatif)")
+    sp.add_argument("--logo", metavar="IMAGE", help="image PNG/JPEG/WebP de l'écran de démarrage")
+    sp.add_argument("--logo-lolos", action="store_true", help="revenir au logo Lol'OS")
+    sp.add_argument("--sans-demarrage", action="store_true", help="ne pas afficher d'écran de démarrage")
+    sp.add_argument("--apercu", action="store_true", help="montrer tout de suite l'écran de démarrage sur la TV")
+    sp.add_argument("--simulation", action="store_true", help="afficher ce qui serait envoyé sans rien modifier")
+    sp.set_defaults(fonction=cmd_personnaliser)
+
+    sp = commande("redemarrer", "redémarrer la box (demande confirmation, ou --oui)")
+    sp.set_defaults(fonction=cmd_redemarrer)
 
     sp = commande("restaurer", "remettre la TV dans l'état d'une sauvegarde",
                   "Réactive les applis désactivées depuis la sauvegarde, remet les réglages sauvegardés, "

@@ -16,6 +16,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -23,7 +24,9 @@ import android.view.KeyEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.graphics.BitmapFactory;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextClock;
@@ -58,6 +61,13 @@ public class MainActivity extends Activity {
     private LinearLayout content, dockRow, grid;
     private TextView gridTitle, hint;
     private View dim, scrim, topScrim, clock;
+    private FrameLayout racine;
+    private TextView salut;
+    private Personnalisation perso;
+    private boolean demarrageMontre;
+
+    /** Lancé par l'installateur pour prévisualiser l'écran de démarrage. */
+    static final String APERCU_DEMARRAGE = "fr.accueil.tv.APERCU_DEMARRAGE";
     private AlertDialog menu;
 
     private int lastDockIndex;
@@ -92,6 +102,10 @@ public class MainActivity extends Activity {
         apps = Apps.load(this);
         renderAll();
         scroll.post(this::focusDock);
+        if (getIntent().getBooleanExtra(APERCU_DEMARRAGE, false)) {
+            demarrageMontre = true;
+            scroll.post(this::montrerDemarrage);
+        }
 
         IntentFilter filter = new IntentFilter();
         filter.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -113,6 +127,7 @@ public class MainActivity extends Activity {
         super.onResume();
         handler.removeCallbacks(resendTv);
         wallpaperPaused = false;
+        appliquerPersonnalisation();
         wallpaper.start(resumedOnce);  // un nouveau paysage à chaque retour
         resumedOnce = true;
         applyScrollFx(scroll.getScrollY());
@@ -128,7 +143,7 @@ public class MainActivity extends Activity {
         if (moving >= 0) endMove();
         if (menu != null) menu.dismiss();
         idle = false;
-        for (View v : new View[] { scroll, clock, scrim, topScrim }) {
+        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) {
             v.animate().cancel();
             v.setAlpha(1f);
         }
@@ -143,6 +158,7 @@ public class MainActivity extends Activity {
         if (menu != null) menu.dismiss();
         if (moving >= 0) endMove();
         focusDock();
+        if (intent.getBooleanExtra(APERCU_DEMARRAGE, false)) montrerDemarrage();
     }
 
     // ---------------------------------------------------------------- interface
@@ -233,6 +249,15 @@ public class MainActivity extends Activity {
         root.addView(clockBox, cl);
         clock = clockBox;
 
+        // Message d'accueil personnalisé (« {moment} Lolo » → « Bonsoir Lolo »)
+        salut = new TextView(this);
+        styleOverlayText(salut, 30, "sans-serif-light", 0xF2FFFFFF);
+        salut.setVisibility(View.GONE);
+        FrameLayout.LayoutParams sl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
+        sl.setMargins(dp(SIDE), dp(26), 0, 0);
+        root.addView(salut, sl);
+        racine = root;
+
         hint = new TextView(this);
         hint.setText("←  →  déplacer        OK  terminer");
         styleOverlayText(hint, 15, "sans-serif-medium", 0xFFFFFFFF);
@@ -318,6 +343,54 @@ public class MainActivity extends Activity {
         t.setShadowLayer(10, 0, 2, 0x99000000);
     }
 
+    // ---------------------------------------------------------------- personnalisation
+
+    private void appliquerPersonnalisation() {
+        perso = Personnalisation.charger(this);
+        String texte = Personnalisation.avecMoment(perso.salutation);
+        salut.setText(texte);
+        salut.setVisibility(texte.isEmpty() ? View.GONE : View.VISIBLE);
+        // Écran de démarrage : au premier affichage après l'allumage de la box
+        if (!demarrageMontre && perso.demarrage && SystemClock.elapsedRealtime() < 10 * 60_000) {
+            demarrageMontre = true;
+            montrerDemarrage();
+        }
+    }
+
+    /** Logo + message en surimpression, puis fondu vers l'accueil. */
+    private void montrerDemarrage() {
+        if (perso == null) perso = Personnalisation.charger(this);
+        LinearLayout ecran = new LinearLayout(this);
+        ecran.setOrientation(LinearLayout.VERTICAL);
+        ecran.setGravity(Gravity.CENTER);
+        ecran.setBackgroundColor(0xFF09090B);
+        ecran.setClickable(true);
+
+        ImageView logo = new ImageView(this);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        if (perso.logo != null) logo.setImageBitmap(BitmapFactory.decodeFile(perso.logo.getPath()));
+        if (logo.getDrawable() == null) logo.setImageResource(R.drawable.marque);
+        ecran.addView(logo, new LinearLayout.LayoutParams(dp(180), dp(180)));
+
+        String texte = Personnalisation.avecMoment(perso.messageDemarrage);
+        if (!texte.isEmpty()) {
+            TextView message = new TextView(this);
+            styleOverlayText(message, 26, "sans-serif-light", 0xF2FFFFFF);
+            message.setGravity(Gravity.CENTER);
+            message.setText(texte);
+            LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(-2, -2);
+            ml.topMargin = dp(24);
+            ecran.addView(message, ml);
+        }
+        racine.addView(ecran, match());
+        logo.setAlpha(0f);
+        logo.setScaleX(0.9f);
+        logo.setScaleY(0.9f);
+        logo.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(600).start();
+        ecran.postDelayed(() -> ecran.animate().alpha(0f).setDuration(700)
+                .withEndAction(() -> racine.removeView(ecran)).start(), perso.dureeDemarrage);
+    }
+
     // ---------------------------------------------------------------- navigation
 
     private void onFocusMoved(View v) {
@@ -346,7 +419,10 @@ public class MainActivity extends Activity {
         int top = gridTop();
         float f = top <= 0 ? 0f : Math.min(1f, Math.max(0f, y / (float) top));
         dim.setAlpha(0.8f * f);
-        if (!idle) clock.setAlpha(1f - f);
+        if (!idle) {
+            clock.setAlpha(1f - f);
+            salut.setAlpha(1f - f);
+        }
         if (f > 0.95f && !wallpaperPaused) {
             wallpaperPaused = true;
             wallpaper.setPaused(true);
@@ -425,12 +501,12 @@ public class MainActivity extends Activity {
             return;
         }
         idle = true;
-        for (View v : new View[] { scroll, clock, scrim, topScrim }) v.animate().alpha(0f).setDuration(1500).start();
+        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) v.animate().alpha(0f).setDuration(1500).start();
     }
 
     private void wake() {
         idle = false;
-        for (View v : new View[] { scroll, clock, scrim, topScrim }) v.animate().alpha(1f).setDuration(250).start();
+        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) v.animate().alpha(1f).setDuration(250).start();
     }
 
     // ---------------------------------------------------------------- actions

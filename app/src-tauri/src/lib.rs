@@ -272,6 +272,44 @@ async fn diagnostic_reseau(ip: String) -> Result<String, String> {
     en_fond(move || Ok(reseau::diagnostic(&ip))).await
 }
 
+#[tauri::command]
+async fn personnaliser(
+    salutation: String,
+    demarrage: bool,
+    message_demarrage: String,
+    logo_base64: Option<String>,
+    apercu: bool,
+    app: AppHandle,
+    etat: State<'_, Appli>,
+) -> Result<(), String> {
+    use base64::Engine;
+    let (adb, serie) = etat.contexte()?;
+    let (profil, dossier) = (etat.profil.clone(), etat.dossier.clone());
+    let logo = match logo_base64.as_deref() {
+        None => None,
+        Some("") => Some(Vec::new()),
+        Some(b64) => Some(
+            base64::engine::general_purpose::STANDARD
+                .decode(b64.split(',').last().unwrap_or(""))
+                .map_err(|e| format!("image illisible : {e}"))?,
+        ),
+    };
+    let perso = operations::Perso { salutation, demarrage, message_demarrage, logo };
+    en_fond(move || {
+        let j = |m: String| journal(&app, &dossier, m);
+        operations::personnaliser(&Tv { adb: &adb, serie: &serie }, &profil, &dossier, &perso, apercu, &j)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn redemarrer_box(etat: State<'_, Appli>) -> Result<(), String> {
+    let (adb, serie) = etat.contexte()?;
+    en_fond(move || operations::redemarrer(&Tv { adb: &adb, serie: &serie })).await?;
+    etat.session.lock().unwrap().serie = None;
+    Ok(())
+}
+
 /// Ouvre Réglages Système → Confidentialité et sécurité → Réseau local (macOS).
 #[tauri::command]
 fn ouvrir_reglages_reseau_local() -> Result<(), String> {
@@ -319,7 +357,9 @@ pub fn run() {
             restaurer,
             dossier_donnees,
             diagnostic_reseau,
-            ouvrir_reglages_reseau_local
+            ouvrir_reglages_reseau_local,
+            personnaliser,
+            redemarrer_box
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");

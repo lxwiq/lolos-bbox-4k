@@ -19,9 +19,11 @@
       <li data-etape="sauvegarde">Sauvegarde</li>
       <li data-etape="applis">Vos applis</li>
       <li data-etape="accueil">Nouvel accueil</li>
+      <li data-etape="personnaliser">Personnaliser</li>
       <li data-etape="verification">Vérification</li>
     </ol>
     <button class="lien" data-aller="restauration">↺ Restaurer une sauvegarde</button>
+    <button class="lien" id="redemarrer">⏻ Redémarrer la box</button>
   </aside>
 
   <main>
@@ -122,7 +124,35 @@
         </ul>
       </div>
       <label class="choix"><input type="checkbox" id="acc-fonds" checked> Installer les paysages animés (téléchargement ≈ 110 Mo, une seule fois)</label>
-      <div class="actions"><button data-aller="applis">Retour</button><button data-aller="verification">Passer</button><button class="principal" id="acc-installer">Installer l'accueil</button></div>
+      <div class="actions"><button data-aller="applis">Retour</button><button data-aller="personnaliser">Passer</button><button class="principal" id="acc-installer">Installer l'accueil</button></div>
+    </section>
+
+    <!-- 7. Personnaliser -->
+    <section id="personnaliser" class="page">
+      <h1>Personnaliser</h1>
+      <p class="intro">Un message d'accueil et un écran de démarrage à votre image. Modifiable à tout moment.</p>
+      <div class="carte large">
+        <h3>Message d'accueil</h3>
+        <p>Affiché en haut à gauche de l'accueil. <code>{moment}</code> devient « Bonjour », « Bon après-midi » ou « Bonsoir ».</p>
+        <input id="perso-salut" class="champ" placeholder="{moment} Lolo" maxlength="60" spellcheck="false">
+      </div>
+      <div class="carte large">
+        <h3>Écran de démarrage</h3>
+        <label class="choix"><input type="checkbox" id="perso-demarrage" checked> Afficher l'écran de démarrage Lol'OS quand la box s'allume</label>
+        <input id="perso-message" class="champ" placeholder="Message (facultatif), ex. Bienvenue à la maison" maxlength="80">
+        <div class="perso-logo">
+          <img id="perso-image" src="logo-lolos.svg" alt="Logo de démarrage">
+          <div>
+            <div class="ligne">
+              <label class="bouton-fichier">Choisir une image…<input type="file" id="perso-fichier" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden></label>
+              <button id="perso-defaut">Logo Lol'OS</button>
+            </div>
+            <p class="petit">PNG, JPEG, WebP ou SVG, redimensionnée automatiquement.</p>
+          </div>
+        </div>
+      </div>
+      <p class="petit">L'animation que la box affiche pendant son démarrage (avant Lol'OS) est verrouillée sur une partition système : l'écran de démarrage Lol'OS prend le relais juste après.</p>
+      <div class="actions"><button data-aller="accueil">Retour</button><button id="perso-apercu">Aperçu sur la TV</button><button class="principal" id="perso-enregistrer">Enregistrer</button></div>
     </section>
 
     <!-- 7. Vérification -->
@@ -132,7 +162,7 @@
       <div id="verif-resultats" class="infos"></div>
       <img id="verif-image" class="capture cache" alt="Capture de l'écran de la TV">
       <p class="petit">La vidéo des chaînes passe par un circuit protégé : sur une capture, le direct apparaît <b>noir</b>, c'est normal. Le test mesure le flux reçu à la place.</p>
-      <div class="actions"><button data-aller="accueil">Retour</button><button class="principal" data-aller="bienvenue">Terminé</button></div>
+      <div class="actions"><button data-aller="personnaliser">Retour</button><button class="principal" data-aller="bienvenue">Terminé</button></div>
     </section>
 
     <!-- Restauration -->

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo Lol'OS seul (sans fond), pour l'écran de démarrage — mêmes tracés que docs/logo/lolos-marque.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp" android:height="120dp"
+    android:viewportWidth="1024" android:viewportHeight="1024">
+    <group android:translateX="512" android:translateY="612" android:scaleX="1.15" android:scaleY="1.15">
+        <path android:fillColor="#FFF6D18B" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" />
+        <group android:rotation="120"><path android:fillColor="#FF4FB3BF" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+        <group android:rotation="240"><path android:fillColor="#FFFAFAFA" android:pathData="M 0 -48 C 64 -96, 122 -160, 118 -230 A 118 118 0 0 0 -118 -230 C -122 -160, -64 -96, 0 -48 Z" /></group>
+    </group>
+</vector>

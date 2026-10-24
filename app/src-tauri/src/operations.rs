@@ -387,3 +387,73 @@ pub fn restaurer(
     journal("✓ accueil Bbox d'origine rétabli — un redémarrage de la TV est conseillé".into());
     Ok(())
 }
+
+/// Message d'accueil et écran de démarrage de Lol'OS (lus par le lanceur à chaque retour à l'accueil).
+pub struct Perso {
+    pub salutation: String,
+    pub demarrage: bool,
+    pub message_demarrage: String,
+    /// PNG du logo de démarrage ; `Some(vec![])` = revenir au logo Lol'OS
+    pub logo: Option<Vec<u8>>,
+}
+
+pub fn personnaliser(
+    tv: &Tv,
+    profil: &Profil,
+    dossier_appli: &Path,
+    perso: &Perso,
+    apercu: bool,
+    journal: &dyn Fn(String),
+) -> Result<(), String> {
+    let distant = profil.accueil.dossier_fonds.trim_end_matches("/fonds").to_string();
+    let json = serde_json::json!({
+        "salutation": perso.salutation,
+        "demarrage": perso.demarrage,
+        "message_demarrage": perso.message_demarrage,
+        "duree_demarrage_ms": 2500,
+    });
+    let local = dossier_appli.join("personnalisation.json");
+    std::fs::write(&local, serde_json::to_vec_pretty(&json).unwrap()).map_err(|e| e.to_string())?;
+    tv.sh(&format!("mkdir -p {distant}"))?;
+    adb::executer(tv.adb, &["-s", tv.serie, "push", &local.to_string_lossy(), &format!("{distant}/personnalisation.json")])?;
+    match &perso.logo {
+        Some(png) if png.is_empty() => {
+            tv.sh(&format!("rm -f {distant}/logo-demarrage.png"))?;
+        }
+        Some(png) => {
+            let fichier = dossier_appli.join("logo-demarrage.png");
+            std::fs::write(&fichier, png).map_err(|e| e.to_string())?;
+            adb::executer(tv.adb, &["-s", tv.serie, "push", &fichier.to_string_lossy(), &format!("{distant}/logo-demarrage.png")])?;
+        }
+        None => {}
+    }
+    journal("✓ Personnalisation envoyée à la TV".into());
+    if apercu {
+        tv.sh(&format!(
+            "am start -n {} --ez fr.accueil.tv.APERCU_DEMARRAGE true",
+            profil.accueil.activite
+        ))?;
+        journal("Aperçu de l'écran de démarrage sur la TV".into());
+    }
+    Ok(())
+}
+
+/// Redémarre la box. `adb reboot` attend que la TV disparaisse (et bloque parfois à travers
+/// le relais) : on le lance, puis on ne l'attend pas plus de quelques secondes.
+pub fn redemarrer(tv: &Tv) -> Result<(), String> {
+    adb::tracer("cmd", format!("adb -s {} reboot", tv.serie));
+    let mut enfant = std::process::Command::new(tv.adb)
+        .args(["-s", tv.serie, "reboot"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    for _ in 0..16 {
+        if let Ok(Some(_)) = enfant.try_wait() {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    let _ = enfant.kill();
+    Ok(())
+}

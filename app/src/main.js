@@ -356,14 +356,100 @@ $("#acc-installer").addEventListener("click", (e) =>
     try {
       await invoke("installer_accueil", { fonds: $("#acc-fonds").checked });
       faite("accueil");
-      aller("verification");
+      aller("personnaliser");
     } catch (err) {
       journal("Erreur : " + err);
     }
   })
 );
 
-// ------------------------------------------------------------------ 7. vérification
+// ------------------------------------------------------------------ 7. personnaliser
+
+etat.logo = undefined; // undefined : inchangé · "" : logo Lol'OS · data:image/png… : image choisie
+
+for (const [id, cle] of [["#perso-salut", "salut"], ["#perso-message", "message"]]) {
+  try { $(id).value = localStorage.getItem("perso-" + cle) || ""; } catch {}
+  $(id).addEventListener("input", (e) => { try { localStorage.setItem("perso-" + cle, e.target.value); } catch {} });
+}
+
+/** Image choisie → PNG d'au plus 720 px, pour ne pas surcharger la box. */
+$("#perso-fichier").addEventListener("change", (e) => {
+  const fichier = e.target.files[0];
+  if (!fichier) return;
+  const lecteur = new FileReader();
+  lecteur.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const echelle = Math.min(1, 720 / Math.max(img.width || 720, img.height || 720));
+      const toile = document.createElement("canvas");
+      toile.width = Math.round((img.width || 720) * echelle);
+      toile.height = Math.round((img.height || 720) * echelle);
+      toile.getContext("2d").drawImage(img, 0, 0, toile.width, toile.height);
+      etat.logo = toile.toDataURL("image/png");
+      $("#perso-image").src = etat.logo;
+      journal("Image de démarrage : " + fichier.name + " (" + toile.width + "×" + toile.height + ")");
+    };
+    img.onerror = () => journal("⚠️ Image illisible : " + fichier.name);
+    img.src = lecteur.result;
+  };
+  lecteur.readAsDataURL(fichier);
+});
+
+$("#perso-defaut").addEventListener("click", () => {
+  etat.logo = "";
+  $("#perso-image").src = "logo-lolos.svg";
+  $("#perso-fichier").value = "";
+});
+
+async function envoyerPerso(apercu) {
+  if (!etat.connecte) {
+    journal("⚠️ Connectez d'abord la TV (étape « Trouver la TV »).");
+    return aller("tv");
+  }
+  try {
+    await invoke("personnaliser", {
+      salutation: $("#perso-salut").value.trim(),
+      demarrage: $("#perso-demarrage").checked,
+      messageDemarrage: $("#perso-message").value.trim(),
+      logoBase64: etat.logo ?? null,
+      apercu,
+    });
+    if (!apercu) {
+      faite("personnaliser");
+      aller("verification");
+    }
+  } catch (err) {
+    journal("Erreur : " + err);
+  }
+}
+$("#perso-apercu").addEventListener("click", (e) => occupe(e.target, () => envoyerPerso(true)));
+$("#perso-enregistrer").addEventListener("click", (e) => occupe(e.target, () => envoyerPerso(false)));
+
+// ------------------------------------------------------------------ redémarrage
+
+let confirmation = null;
+$("#redemarrer").addEventListener("click", async (e) => {
+  const b = e.target;
+  if (!etat.connecte) return journal("⚠️ Connectez d'abord la TV pour pouvoir la redémarrer.");
+  if (!confirmation) {
+    b.textContent = "⏻ Cliquez encore pour confirmer";
+    confirmation = setTimeout(() => { b.textContent = "⏻ Redémarrer la box"; confirmation = null; }, 4000);
+    return;
+  }
+  clearTimeout(confirmation);
+  confirmation = null;
+  b.textContent = "⏻ Redémarrer la box";
+  try {
+    await invoke("redemarrer_box");
+    etat.connecte = false;
+    $("#tv-suivant").disabled = true;
+    journal("La box redémarre (environ 1 minute). Reconnectez-la ensuite à l'étape « Trouver la TV ».");
+  } catch (err) {
+    journal("Erreur : " + err);
+  }
+});
+
+// ------------------------------------------------------------------ 8. vérification
 
 async function verifier() {
   if (!etat.connecte) return;
