@@ -114,11 +114,8 @@ async fn connecter(ip: String, etat: State<'_, Appli>) -> Result<String, String>
     let ip = ip.trim().to_string();
     let adb = etat.session.lock().unwrap().adb.clone().ok_or("adb n'est pas encore prêt")?;
     let ip_sonde = ip.clone();
-    if !en_fond(move || reseau::port_adb_ouvert(&ip_sonde)).await? {
-        return Err(format!(
-            "La TV {ip} ne répond pas sur le port ADB (5555) : vérifiez l'adresse et activez le débogage (voir les étapes)."
-        ));
-    }
+    let port_ouvert = en_fond(move || reseau::port_adb_ouvert(&ip_sonde)).await?;
+    adb::tracer("info", format!("port ADB 5555 de {ip} : {}", if port_ouvert { "ouvert" } else { "pas de réponse, on tente quand même" }));
     let serie = if cfg!(target_os = "macos") {
         // adb (binaire tiers) passe par un relais local : macOS ne le laisse pas joindre la TV.
         let mut s = etat.session.lock().unwrap();
@@ -136,7 +133,12 @@ async fn connecter(ip: String, etat: State<'_, Appli>) -> Result<String, String>
         format!("{ip}:5555")
     };
     let (a, s) = (adb.clone(), serie.clone());
-    en_fond(move || adb::executer(&a, &["connect", &s])).await?;
+    let reponse = en_fond(move || adb::executer(&a, &["connect", &s])).await?;
+    if !port_ouvert && !reponse.contains("connected") {
+        return Err(format!(
+            "La TV {ip} ne répond pas sur le port ADB (5555) : vérifiez l'adresse et activez le débogage (voir les étapes)."
+        ));
+    }
     etat.session.lock().unwrap().serie = Some(serie.clone());
     // La TV met parfois quelques secondes à passer de « offline » à « device » / « unauthorized ».
     for _ in 0..6 {

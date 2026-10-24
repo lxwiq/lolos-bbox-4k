@@ -62,8 +62,12 @@ enum Sonde {
 }
 
 fn sonder_direct(ip: Ipv4Addr, port: u16) -> Sonde {
+    sonder_direct_delai(ip, port, Duration::from_millis(500))
+}
+
+fn sonder_direct_delai(ip: Ipv4Addr, port: u16, delai: Duration) -> Sonde {
     let debut = Instant::now();
-    match TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(ip), port), Duration::from_millis(500)) {
+    match TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(ip), port), delai) {
         Ok(_) => Sonde::Ouvert,
         Err(e) if MAC && e.raw_os_error() == Some(EHOSTUNREACH_MAC) && debut.elapsed() < Duration::from_millis(60) => {
             Sonde::RefusImmediat
@@ -164,11 +168,15 @@ pub fn chercher() -> Recherche {
 
 pub fn port_adb_ouvert(ip: &str) -> Result<bool, String> {
     let ip: Ipv4Addr = ip.parse().map_err(|_| format!("« {ip} » n'est pas une adresse IP"))?;
-    Ok(match sonder_direct(ip, 5555) {
-        Sonde::Ouvert => true,
-        Sonde::RefusImmediat => sonder_nc(ip, 5555),
-        Sonde::Ferme => false,
-    })
+    // Le Wi-Fi de la TV répond parfois lentement : sonde patiente, deux essais.
+    for _ in 0..2 {
+        match sonder_direct_delai(ip, 5555, Duration::from_secs(3)) {
+            Sonde::Ouvert => return Ok(true),
+            Sonde::RefusImmediat if sonder_nc(ip, 5555) => return Ok(true),
+            _ => {}
+        }
+    }
+    Ok(false)
 }
 
 /// Diagnostic détaillé d'une adresse : connexion directe et via nc, avec les erreurs exactes.
