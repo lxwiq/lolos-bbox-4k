@@ -520,10 +520,10 @@ pub fn envoyer_fonds(tv: &Tv, profil: &Profil, chemins: &[PathBuf], journal: &dy
 pub fn retirer_fonds(tv: &Tv, profil: &Profil, noms: &[String]) -> Result<(), String> {
     for nom in noms {
         // Seulement vos fonds, et seulement la forme produite par nom_fond() :
-        // perso-[a-z0-9-]+.(mp4|jpg|jpeg|png) — rien qui puisse sortir de la commande shell.
+        // perso-[a-z0-9._-]+.(mp4|jpg|jpeg|png) — rien qui puisse sortir de la commande shell.
         let valide = nom.strip_prefix("perso-").and_then(|reste| reste.rsplit_once('.')).is_some_and(|(base, ext)| {
             !base.is_empty()
-                && base.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && base.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_.".contains(c))
                 && ["mp4", "jpg", "jpeg", "png"].contains(&ext)
         });
         if !valide {
