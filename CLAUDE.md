@@ -30,6 +30,14 @@ ADB et installe un écran d'accueil minimaliste. Tout ce qui est affiché à l'u
    (`/proc/net/dev`, ≈13 Mbit/s quand une chaîne joue).
 6. La touche TV de la télécommande ouvre toujours le direct ; les bandeaux de l'accueil Bbox viennent des
    serveurs Bouygues.
+7. Au réveil, `fr.bouyguestelecom.tv.power` (StandByService → restartEntryPoint) relance l'interface Bbox sauf si
+   le libellé d'application au premier plan est dans sa liste blanche (« BBOX TV »…) : le lanceur porte donc
+   `android:label="BBOX TV"` au niveau application (activité : « Lol'OS ») et se met devant sur SCREEN_OFF.
+8. Redémarrer sans root : broadcast explicite `fr.bouyguestelecom.tv.power/.PowerReceiver`, action
+   `fr.bouyguestelecom.tv.power.REBOOT_QUIESCENT` (la box revient en veille) ; `GO_TO_SLEEP` = veille. Ne jamais
+   utiliser `MonitorUpdateService` (OTA), `DreamApplyService` (extinction) ni `FactoryResetActivity`.
+9. Logo de démarrage Android et message « Bonjour… » de la Bbox : non modifiables sans root (partition système,
+   contenu éditorial serveur). L'écran de démarrage Lol'OS (`personnalisation.json` + `logo-demarrage.png`) les remplace.
 
 ## Règles
 

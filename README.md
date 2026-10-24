@@ -28,7 +28,10 @@ Votre décodeur **Bbox 4K de Bouygues Telecom** (Android TV) est **lent**, rempl
 - 🏔️ **Nouvel écran d'accueil façon Apple TV** : un dock de vos applis, la **TV en direct en un clic**, plus aucun
   bandeau de recommandations, et des **paysages animés** en fond (forêt, cascade, océan, nuages, rivière, aurore
   boréale), avec l'écran de veille assorti.
+- ✍️ **À votre image** : message d'accueil (« Bonsoir Lolo ») et écran de démarrage avec votre logo.
+- ⏻ **Redémarrer ou mettre en veille** la box depuis l'accueil, sans root.
 - 💾 **Sauvegarde automatique** avant toute modification et **restauration en un clic**.
+- 🔄 **Mises à jour automatiques** de l'installateur et de l'accueil de la TV.
 - 📺 **Les chaînes de télé ne sont jamais touchées** : direct, guide des programmes, enregistrements, télécommande.
 
 | Avant : l'accueil Bbox | Après : Lol'OS |
@@ -78,7 +81,13 @@ L'installateur vous guide étape par étape :
 3. **Sauvegarde** — l'état de la TV est enregistré.
 4. **Vos applis** — cochez ce que vous voulez désactiver (pubs et télémétrie sont précochées).
 5. **Nouvel accueil** — installe Lol'OS et les paysages.
-6. **Vérification** — capture d'écran de la TV et test du direct.
+6. **Personnaliser** — message d'accueil (`{moment}` devient Bonjour / Bon après-midi / Bonsoir), écran de
+   démarrage avec votre image, aperçu immédiat sur la TV.
+7. **Vérification** — capture d'écran de la TV et test du direct.
+
+L'installateur se **met à jour tout seul** (bandeau « Lol'OS x.y est disponible ») et propose de **mettre à jour
+l'accueil de la TV** quand il en livre une version plus récente — vos réglages sont conservés. En bas à gauche :
+**Redémarrer la box**.
 
 Le **journal** en bas de la fenêtre s'ouvre d'un clic et affiche en direct chaque commande envoyée à la TV.
 
@@ -103,6 +112,8 @@ python3 cli/lolos.py verifier --direct   # vérifie tout, y compris la TV en dir
 python3 cli/lolos.py restaurer           # remet la TV comme avant
 ```
 
+`python3 cli/lolos.py personnaliser --message "{moment} Lolo" --logo image.png --apercu` et
+`python3 cli/lolos.py redemarrer` complètent la liste.
 `--simulation` montre ce qui serait fait sans rien changer, `--json` donne une sortie lisible par un programme.
 Si `adb` manque, le script propose de l'installer.
 
@@ -159,6 +170,9 @@ La liste complète, avec ce que fait chaque appli, est dans [`profil/bbox-4k.jso
 | Les **recommandations** reviennent toujours sur l'accueil Bbox | Elles viennent des serveurs Bouygues, pas des applis. | L'accueil est **remplacé**. |
 | Ouvrir l'appli TV affiche l'accueil Bbox, pas le direct | La touche TV de la télécommande est une touche globale. | La tuile TV utilise le lien interne `https://media.bbox.fr/channel/live`, renvoyé pendant le démarrage de la Bbox. |
 | Le direct est **noir** sur les captures d'écran | La vidéo passe par un plan matériel protégé. | Le test du direct mesure le flux reçu (≈ 13 Mbit/s). |
+| Au **rallumage**, l'écran Bouygues revient | Le service d'alimentation (`fr.bouyguestelecom.tv.power`) relance l'interface Bbox sauf si l'appli au premier plan porte un nom de sa liste blanche (« BBOX TV »…). | L'appli Lol'OS porte le libellé interne « BBOX TV » (la tuile reste « Lol'OS ») et se place devant à la mise en veille. |
+| **Redémarrer** sans root | Le même service accepte, sans permission, `REBOOT_QUIESCENT` (redémarrage propre, la box revient en veille) et `GO_TO_SLEEP`. | Tuiles « Redémarrer » et « Mettre en veille ». |
+| Changer le **logo de démarrage** ou le « Bonjour… » de la Bbox | L'animation est sur une partition système en lecture seule ; le message vient des serveurs Bouygues. | Impossible sans root : l'écran de démarrage Lol'OS, personnalisable, prend le relais. |
 
 **Le projet :**
 
