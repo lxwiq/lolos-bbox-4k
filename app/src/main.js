@@ -180,6 +180,15 @@ async function chercher() {
   let r;
   try { r = await invoke("chercher_tv"); } finally { etat.enRecherche = false; }
   const tvs = r.tvs;
+  if (!tvs.length && r.acces_bloque) {
+    el.classList.remove("cache", "ok", "attente");
+    el.classList.add("erreur");
+    el.innerHTML = `<span>macOS empêche Lol'OS d'accéder au réseau local. Ouvrez <b>Réglages Système → Confidentialité et
+      sécurité → Réseau local</b>, activez <b>LolOS</b>, puis relancez la recherche.</span>
+      <button id="tv-reglages">Ouvrir les réglages</button>`;
+    $("#tv-reglages").addEventListener("click", () => invoke("ouvrir_reglages_reseau_local"));
+    return;
+  }
   if (!tvs.length) {
     statut(el, `Aucune TV trouvée sur le réseau ${r.reseau}. Vérifiez qu'elle est allumée (pas en veille) et sur le même ` +
       "réseau que cet ordinateur (attention aux VPN), ou saisissez son adresse IP.", "erreur");

@@ -121,9 +121,7 @@ pub fn sauvegarder(tv: &Tv, dossier_racine: &Path) -> Result<PathBuf, String> {
     for (nom, cmd) in fichiers {
         std::fs::write(dossier.join(nom), tv.sh(cmd)?).map_err(|e| e.to_string())?;
     }
-    if let Ok(png) = capture_png(tv) {
-        let _ = std::fs::write(dossier.join("capture-avant.png"), png);
-    }
+    let _ = capture_png(tv, &dossier.join("capture-avant.png"));
     Ok(dossier)
 }
 
@@ -238,7 +236,8 @@ pub fn installer_accueil(
     journal: &dyn Fn(String),
 ) -> Result<(), String> {
     let a = &profil.accueil;
-    let apk = std::env::temp_dir().join("Accueil.apk");
+    // Dossier privé de l'appli, pas le /tmp partagé : personne d'autre ne peut remplacer l'APK.
+    let apk = dossier_appli.join("Accueil.apk");
     std::fs::write(&apk, APK).map_err(|e| e.to_string())?;
     journal("Installation de l'écran d'accueil…".into());
     adb::executer(tv.adb, &["-s", tv.serie, "install", "-r", &apk.to_string_lossy()])?;
@@ -299,18 +298,15 @@ fn fonds_locaux(dossier_appli: &Path, journal: &dyn Fn(String)) -> Result<Vec<Pa
 }
 
 /// `exec-out screencap` est pollué par un message du pilote Marvell : on passe par /sdcard.
-pub fn capture_png(tv: &Tv) -> Result<Vec<u8>, String> {
+pub fn capture_png(tv: &Tv, destination: &Path) -> Result<Vec<u8>, String> {
     tv.sh("screencap -p /sdcard/_cap.png")?;
-    let local = std::env::temp_dir().join(format!("bbox-capture-{}.png", std::process::id()));
-    adb::executer(tv.adb, &["-s", tv.serie, "pull", "/sdcard/_cap.png", &local.to_string_lossy()])?;
+    adb::executer(tv.adb, &["-s", tv.serie, "pull", "/sdcard/_cap.png", &destination.to_string_lossy()])?;
     let _ = tv.sh("rm -f /sdcard/_cap.png");
-    let png = std::fs::read(&local).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&local);
-    Ok(png)
+    std::fs::read(destination).map_err(|e| e.to_string())
 }
 
-pub fn capture_data_url(tv: &Tv) -> Result<String, String> {
-    let png = capture_png(tv)?;
+pub fn capture_data_url(tv: &Tv, dossier_appli: &Path) -> Result<String, String> {
+    let png = capture_png(tv, &dossier_appli.join("capture.png"))?;
     Ok(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)))
 }
 

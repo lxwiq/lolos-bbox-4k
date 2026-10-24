@@ -231,7 +231,8 @@ async fn installer_accueil(fonds: bool, app: AppHandle, etat: State<'_, Appli>) 
 #[tauri::command]
 async fn capture(etat: State<'_, Appli>) -> Result<String, String> {
     let (adb, serie) = etat.contexte()?;
-    en_fond(move || operations::capture_data_url(&Tv { adb: &adb, serie: &serie })).await
+    let dossier = etat.dossier.clone();
+    en_fond(move || operations::capture_data_url(&Tv { adb: &adb, serie: &serie }, &dossier)).await
 }
 
 #[tauri::command]
@@ -269,6 +270,16 @@ async fn diagnostic_reseau(ip: String) -> Result<String, String> {
     en_fond(move || Ok(reseau::diagnostic(&ip))).await
 }
 
+/// Ouvre Réglages Système → Confidentialité et sécurité → Réseau local (macOS).
+#[tauri::command]
+fn ouvrir_reglages_reseau_local() -> Result<(), String> {
+    std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn dossier_donnees(etat: State<Appli>) -> String {
     etat.dossier.to_string_lossy().to_string()
@@ -281,6 +292,12 @@ pub fn run() {
             let dossier = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dossier)?;
             installer_traceur(app.handle().clone(), dossier.clone());
+            // macOS : un premier essai vers la box fait apparaître tout de suite la demande
+            // d'autorisation « Réseau local », avant que l'utilisateur n'arrive à la recherche.
+            std::thread::spawn(|| {
+                let ok = reseau::acces_reseau_local();
+                adb::tracer("info", format!("accès au réseau local : {}", if ok { "autorisé" } else { "refusé par macOS" }));
+            });
             adb::tracer("info", format!("Lol'OS {} démarré — données dans {}", env!("CARGO_PKG_VERSION"), dossier.display()));
             app.manage(Appli { session: Mutex::new(Session::default()), profil: profil::charger(), dossier });
             Ok(())
@@ -302,7 +319,8 @@ pub fn run() {
             tester_direct,
             restaurer,
             dossier_donnees,
-            diagnostic_reseau
+            diagnostic_reseau,
+            ouvrir_reglages_reseau_local
         ])
         .run(tauri::generate_context!())
         .expect("erreur au lancement de l'application");
@@ -338,7 +356,7 @@ mod essais {
         let dossier = std::env::temp_dir().join("lolos-essai-sauvegardes");
         let s = operations::sauvegarder(&tv, &dossier).unwrap();
         println!("sauvegarde : {} ({} fichiers)", s.display(), std::fs::read_dir(&s).unwrap().count());
-        assert!(operations::capture_png(&tv).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
+        assert!(operations::capture_png(&tv, &s.join("capture-essai.png")).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
         println!("capture : PNG valide");
     }
 }
