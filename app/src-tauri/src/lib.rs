@@ -468,7 +468,7 @@ pub fn run() {
             // macOS : un premier essai vers la box fait apparaître tout de suite la demande
             // d'autorisation « Réseau local », avant que l'utilisateur n'arrive à la recherche.
             std::thread::spawn(reseau::declencher_demande_acces);
-            adb::tracer("info", format!("Lol'OS {} démarré — données dans {}", env!("CARGO_PKG_VERSION"), dossier.display()));
+            adb::tracer("info", format!("Lol'OS {} démarré · données : {}", env!("CARGO_PKG_VERSION"), dossier.display()));
             app.manage(Appli { session: Mutex::new(Session::default()), profil: profil::charger(), dossier });
             Ok(())
         })
