@@ -15,8 +15,8 @@ jobs:
     name: Lanceur Android (APK)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -29,7 +29,7 @@ jobs:
         env:
           KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
         run: bash android/compiler.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: apk
           path: |
@@ -54,14 +54,14 @@ jobs:
             args: ""
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
         with:
           name: apk
           path: android
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "24"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -73,17 +73,35 @@ jobs:
       - name: CLI Tauri
         working-directory: app
         run: npm install
+      # macOS : certificat auto-signé « LolOS », stable d'une version à l'autre (sinon macOS voit une « nouvelle »
+      # appli à chaque mise à jour et retire l'autorisation « Réseau local »). Tauri n'accepte via APPLE_CERTIFICATE
+      # que des certificats de confiance : on l'importe ici et Tauri le désigne par son nom (APPLE_SIGNING_IDENTITY).
+      - name: Certificat de signature macOS
+        if: matrix.os == 'macos-latest'
+        env:
+          CERTIFICAT: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICAT_MDP: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          [ -n "$CERTIFICAT" ] || { echo "Pas de certificat : signature ad hoc"; exit 0; }
+          TROUSSEAU="$RUNNER_TEMP/lolos.keychain-db"
+          MDP=$(openssl rand -hex 16)
+          echo "$CERTIFICAT" | base64 --decode > "$RUNNER_TEMP/lolos.p12"
+          security create-keychain -p "$MDP" "$TROUSSEAU"
+          security set-keychain-settings -lut 3600 "$TROUSSEAU"
+          security unlock-keychain -p "$MDP" "$TROUSSEAU"
+          security import "$RUNNER_TEMP/lolos.p12" -k "$TROUSSEAU" -P "$CERTIFICAT_MDP" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MDP" "$TROUSSEAU" > /dev/null
+          security list-keychains -d user -s "$TROUSSEAU" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/lolos.p12"
+          security find-identity -p codesigning "$TROUSSEAU"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signature des mises à jour automatiques (latest.json + .sig)
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # macOS : signature avec un certificat stable (auto-signé « Lol'OS »). Sans elle, chaque
-          # version est une « nouvelle » appli pour macOS et perd l'autorisation « Réseau local ».
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # macOS : identité importée à l'étape « Certificat de signature macOS »
+          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && secrets.APPLE_SIGNING_IDENTITY || '' }}
         with:
           projectPath: app
           tagName: ${{ github.event.release.tag_name }}
@@ -96,8 +114,8 @@ jobs:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
         with:
           name: apk
           path: android
