@@ -20,6 +20,7 @@
       <li data-etape="applis">Vos applis</li>
       <li data-etape="accueil">Nouvel accueil</li>
       <li data-etape="personnaliser">Personnaliser</li>
+      <li data-etape="options">Options</li>
       <li data-etape="verification">Vérification</li>
     </ol>
     <button class="lien" data-aller="restauration">↺ Restaurer une sauvegarde</button>
@@ -138,7 +139,7 @@
     <!-- 7. Personnaliser -->
     <section id="personnaliser" class="page">
       <h1>Personnaliser</h1>
-      <p class="intro">Un message d'accueil et un écran de démarrage à votre image. Modifiable à tout moment.</p>
+      <p class="intro">Tout est facultatif et modifiable à tout moment. Les réglages actuels de la TV sont affichés.</p>
       <div class="carte large">
         <h3>Message d'accueil</h3>
         <p>Affiché en haut à gauche de l'accueil. <code>{moment}</code> devient « Bonjour », « Bon après-midi » ou « Bonsoir ».</p>
@@ -159,18 +160,62 @@
           </div>
         </div>
       </div>
+      <div class="carte large">
+        <h3>Fonds d'écran</h3>
+        <label class="choix"><input type="checkbox" id="perso-paysages" checked> Afficher les paysages Lol'OS</label>
+        <p>Ajoutez vos photos (JPEG, PNG, animées par un lent zoom) ou vidéos (MP4, 1080p conseillé, le son est ignoré).</p>
+        <ul id="fonds-liste" class="liste fonds"></ul>
+        <button id="fonds-ajouter">Ajouter des photos ou vidéos…</button>
+      </div>
+      <div class="carte large">
+        <h3>Météo</h3>
+        <p>La météo du jour sous l'heure (Open-Meteo : gratuit, sans compte ; seule la ville est transmise).</p>
+        <div class="ligne">
+          <input id="meteo-ville" placeholder="Votre ville, ex. Lyon" spellcheck="false">
+          <button id="meteo-chercher">Chercher</button>
+          <button id="meteo-retirer">Retirer</button>
+        </div>
+        <p class="petit" id="meteo-resultat">Pas de météo.</p>
+      </div>
+      <div class="carte large">
+        <h3>Mode nuit</h3>
+        <label class="choix"><input type="checkbox" id="perso-nuit"> De 21 h à 7 h, assombrir l'accueil et ne montrer que des paysages calmes</label>
+      </div>
       <p class="petit">L'animation que la box affiche pendant son démarrage (avant Lol'OS) est verrouillée sur une partition système : l'écran de démarrage Lol'OS prend le relais juste après.</p>
       <div class="actions"><button data-aller="accueil">Retour</button><button id="perso-apercu">Aperçu sur la TV</button><button class="principal" id="perso-enregistrer">Enregistrer</button></div>
     </section>
 
-    <!-- 7. Vérification -->
+    <!-- 8. Options -->
+    <section id="options" class="page">
+      <h1>Options</h1>
+      <p class="intro">Réglages facultatifs, désactivés par défaut.</p>
+      <div class="carte large">
+        <h3>Nettoyage de la mémoire</h3>
+        <label class="choix"><input type="checkbox" id="opt-nettoyage"> Au retour à l'accueil, fermer les applis restées en arrière-plan</label>
+        <p>La TV en direct, Chromecast et YouTube sont épargnés. Gain typique : 30 à 60 Mo.</p>
+      </div>
+      <div class="carte large">
+        <h3>Infos système</h3>
+        <label class="choix"><input type="checkbox" id="opt-infos"> Ajouter la tuile « Infos système » (mémoire, stockage, réseau, température)</label>
+      </div>
+      <div class="carte large">
+        <h3>Veille profonde</h3>
+        <p>Après ce délai en veille, la box s'éteint vraiment : le rallumage devient un démarrage complet (environ 1 min).</p>
+        <label class="choix"><input type="radio" name="veille" value="1h" checked> 1 heure (réglage Bouygues, le plus économe)</label>
+        <label class="choix"><input type="radio" name="veille" value="24h"> 24 heures (rallumage rapide au quotidien)</label>
+        <label class="choix"><input type="radio" name="veille" value="jamais"> Jamais (rallumage toujours rapide, consomme un peu plus)</label>
+      </div>
+      <div class="actions"><button data-aller="personnaliser">Retour</button><button class="principal" id="opt-enregistrer">Enregistrer</button></div>
+    </section>
+
+    <!-- 9. Vérification -->
     <section id="verification" class="page">
       <h1>Vérification</h1>
       <div class="ligne"><button id="verif-capture">Capture de la TV</button><button id="verif-direct">Tester la TV en direct</button></div>
       <div id="verif-resultats" class="infos"></div>
       <img id="verif-image" class="capture cache" alt="Capture de l'écran de la TV">
       <p class="petit">La vidéo des chaînes passe par un circuit protégé : sur une capture, le direct apparaît <b>noir</b>, c'est normal. Le test mesure le flux reçu à la place.</p>
-      <div class="actions"><button data-aller="personnaliser">Retour</button><button class="principal" data-aller="bienvenue">Terminé</button></div>
+      <div class="actions"><button data-aller="options">Retour</button><button class="principal" data-aller="bienvenue">Terminé</button></div>
     </section>
 
     <!-- Restauration -->

@@ -10,11 +10,9 @@ import java.nio.file.Files;
 import java.util.Calendar;
 
 /**
- * Réglages choisis dans l'installateur, déposés par adb dans
- * /sdcard/Android/data/fr.accueil.tv/files/ :
- *   personnalisation.json  {"salutation": "{moment} Lolo", "demarrage": true,
- *                           "message_demarrage": "Bienvenue", "duree_demarrage_ms": 2500}
- *   logo-demarrage.png     image facultative (sinon le logo Lol'OS)
+ * Réglages choisis dans l'installateur ou le CLI, déposés par adb dans
+ * /sdcard/Android/data/fr.accueil.tv/files/ — format décrit dans docs/personnalisation.md.
+ * Toutes les options sont facultatives et désactivées par défaut.
  */
 final class Personnalisation {
     static final String FICHIER = "personnalisation.json";
@@ -25,6 +23,12 @@ final class Personnalisation {
     final String messageDemarrage;
     final long dureeDemarrage;
     final File logo;  // null : logo Lol'OS intégré
+    final boolean nettoyageMemoire;
+    final boolean infosSysteme;
+    final boolean modeNuit;
+    final boolean fondsLolos;
+    final String meteoVille;  // null : pas de météo
+    final double latitude, longitude;
 
     private Personnalisation(JSONObject o, File dossier) {
         salutation = o.optString("salutation", "").trim();
@@ -33,6 +37,15 @@ final class Personnalisation {
         dureeDemarrage = Math.max(1000, Math.min(10_000, o.optLong("duree_demarrage_ms", 2500)));
         File f = dossier == null ? null : new File(dossier, LOGO);
         logo = f != null && f.isFile() ? f : null;
+        nettoyageMemoire = o.optBoolean("nettoyage_memoire", false);
+        infosSysteme = o.optBoolean("infos_systeme", false);
+        modeNuit = o.optBoolean("mode_nuit", false);
+        fondsLolos = o.optBoolean("fonds_lolos", true);
+        JSONObject m = o.optJSONObject("meteo");
+        boolean meteo = m != null && m.has("latitude") && m.has("longitude");
+        meteoVille = meteo ? m.optString("ville", "") : null;
+        latitude = meteo ? m.optDouble("latitude") : 0;
+        longitude = meteo ? m.optDouble("longitude") : 0;
     }
 
     static Personnalisation charger(Context context) {
@@ -45,6 +58,12 @@ final class Personnalisation {
             // fichier absent ou illisible : valeurs par défaut
         }
         return new Personnalisation(o, dossier);
+    }
+
+    /** Mode nuit actif maintenant (21 h – 7 h) ? */
+    boolean nuit() {
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        return modeNuit && (h >= 21 || h < 7);
     }
 
     /** Remplace {moment} par Bonjour / Bon après-midi / Bonsoir selon l'heure. */

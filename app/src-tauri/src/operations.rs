@@ -402,35 +402,39 @@ pub fn restaurer(
     Ok(())
 }
 
-/// Message d'accueil et écran de démarrage de Lol'OS (lus par le lanceur à chaque retour à l'accueil).
-pub struct Perso {
-    pub salutation: String,
-    pub demarrage: bool,
-    pub message_demarrage: String,
-    /// PNG du logo de démarrage ; `Some(vec![])` = revenir au logo Lol'OS
-    pub logo: Option<Vec<u8>>,
+fn dossier_lolos(profil: &Profil) -> String {
+    profil.accueil.dossier_fonds.trim_end_matches("/fonds").to_string()
 }
 
+/// Configuration actuelle de Lol'OS sur la TV (objet vide si aucune).
+pub fn lire_personnalisation(tv: &Tv, profil: &Profil) -> serde_json::Value {
+    tv.sh(&format!("cat {}/personnalisation.json 2>/dev/null", dossier_lolos(profil)))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .filter(|v: &serde_json::Value| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
+/// Dépose personnalisation.json (+ logo) — format dans docs/personnalisation.md.
+/// `logo` : None = inchangé, Some(vide) = revenir au logo Lol'OS, Some(png) = nouvelle image.
 pub fn personnaliser(
     tv: &Tv,
     profil: &Profil,
     dossier_appli: &Path,
-    perso: &Perso,
+    config: &serde_json::Value,
+    logo: Option<Vec<u8>>,
     apercu: bool,
     journal: &dyn Fn(String),
 ) -> Result<(), String> {
-    let distant = profil.accueil.dossier_fonds.trim_end_matches("/fonds").to_string();
-    let json = serde_json::json!({
-        "salutation": perso.salutation,
-        "demarrage": perso.demarrage,
-        "message_demarrage": perso.message_demarrage,
-        "duree_demarrage_ms": 2500,
-    });
+    if !config.is_object() {
+        return Err("configuration invalide".into());
+    }
+    let distant = dossier_lolos(profil);
     let local = dossier_appli.join("personnalisation.json");
-    std::fs::write(&local, serde_json::to_vec_pretty(&json).unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&local, serde_json::to_vec_pretty(config).unwrap()).map_err(|e| e.to_string())?;
     tv.sh(&format!("mkdir -p {distant}"))?;
     adb::executer(tv.adb, &["-s", tv.serie, "push", &local.to_string_lossy(), &format!("{distant}/personnalisation.json")])?;
-    match &perso.logo {
+    match logo {
         Some(png) if png.is_empty() => {
             tv.sh(&format!("rm -f {distant}/logo-demarrage.png"))?;
         }
@@ -441,15 +445,134 @@ pub fn personnaliser(
         }
         None => {}
     }
-    journal("✓ Personnalisation envoyée à la TV".into());
+    journal("✓ Personnalisation envoyée à la TV (appliquée au retour à l'accueil)".into());
     if apercu {
-        tv.sh(&format!(
-            "am start -n {} --ez fr.accueil.tv.APERCU_DEMARRAGE true",
-            profil.accueil.activite
-        ))?;
+        tv.sh(&format!("am start -n {} --ez fr.accueil.tv.APERCU_DEMARRAGE true", profil.accueil.activite))?;
         journal("Aperçu de l'écran de démarrage sur la TV".into());
     }
     Ok(())
+}
+
+#[derive(Serialize)]
+pub struct Fond {
+    pub nom: String,
+    pub taille_mo: f64,
+}
+
+/// Vos fonds (perso-*) présents sur la TV.
+pub fn lister_fonds(tv: &Tv, profil: &Profil) -> Result<Vec<Fond>, String> {
+    let sortie = tv.sh(&format!("ls -l {}/ 2>/dev/null", profil.accueil.dossier_fonds))?;
+    Ok(sortie
+        .lines()
+        .filter_map(|l| {
+            let champs: Vec<&str> = l.split_whitespace().collect();
+            let nom = champs.last()?;
+            if !nom.starts_with("perso-") {
+                return None;
+            }
+            let taille: f64 = champs.get(4)?.parse().ok()?;
+            Some(Fond { nom: nom.to_string(), taille_mo: (taille / 1_048_576.0 * 10.0).round() / 10.0 })
+        })
+        .collect())
+}
+
+/// Nom de fichier sur la TV : perso-<nom sans accents ni espaces>.<ext>
+fn nom_fond(chemin: &Path) -> Option<String> {
+    let ext = chemin.extension()?.to_string_lossy().to_lowercase();
+    if !["mp4", "jpg", "jpeg", "png"].contains(&ext.as_str()) {
+        return None;
+    }
+    let base: String = chemin
+        .file_stem()?
+        .to_string_lossy()
+        .chars()
+        .map(|c| match c {
+            'à' | 'â' | 'ä' | 'À' | 'Â' => 'a',
+            'é' | 'è' | 'ê' | 'ë' | 'É' | 'È' => 'e',
+            'î' | 'ï' => 'i',
+            'ô' | 'ö' => 'o',
+            'ù' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            c if c.is_ascii_alphanumeric() => c.to_ascii_lowercase(),
+            _ => '-',
+        })
+        .collect();
+    Some(format!("perso-{}.{ext}", base.trim_matches('-')))
+}
+
+pub fn envoyer_fonds(tv: &Tv, profil: &Profil, chemins: &[PathBuf], journal: &dyn Fn(String)) -> Result<usize, String> {
+    let dossier = &profil.accueil.dossier_fonds;
+    tv.sh(&format!("mkdir -p {dossier}"))?;
+    let mut envoyes = 0;
+    for chemin in chemins {
+        let Some(nom) = nom_fond(chemin) else {
+            journal(format!("⚠️ Ignoré (format non pris en charge) : {}", chemin.display()));
+            continue;
+        };
+        journal(format!("Envoi de {nom}…"));
+        adb::executer(tv.adb, &["-s", tv.serie, "push", &chemin.to_string_lossy(), &format!("{dossier}/{nom}")])?;
+        envoyes += 1;
+    }
+    journal(format!("✓ {envoyes} fond(s) envoyé(s)"));
+    Ok(envoyes)
+}
+
+pub fn retirer_fonds(tv: &Tv, profil: &Profil, noms: &[String]) -> Result<(), String> {
+    for nom in noms {
+        // seulement vos fonds : jamais les paysages Lol'OS
+        if !nom.starts_with("perso-") || nom.contains('/') || nom.contains("..") {
+            return Err(format!("nom de fond refusé : {nom}"));
+        }
+        tv.sh(&format!("rm -f '{}/{nom}'", profil.accueil.dossier_fonds))?;
+    }
+    Ok(())
+}
+
+/// Veille profonde : « 1h » (Bouygues), « 24h » ou « jamais ».
+pub fn regler_veille(tv: &Tv, mode: &str, journal: &dyn Fn(String)) -> Result<(), String> {
+    match mode {
+        "1h" | "24h" => {
+            let delai = if mode == "1h" { 3_600_000 } else { 86_400_000 };
+            tv.sh("settings put global lowpower_control_enabled 1")?;
+            tv.sh(&format!("settings put global lowpower_control_delay {delai}"))?;
+        }
+        "jamais" => {
+            tv.sh("settings put global lowpower_control_enabled 0")?;
+        }
+        _ => return Err(format!("mode de veille inconnu : {mode}")),
+    }
+    journal(format!("✓ Veille profonde : {mode}"));
+    Ok(())
+}
+
+pub fn lire_veille(tv: &Tv) -> String {
+    let actif = tv.sh("settings get global lowpower_control_enabled").unwrap_or_default();
+    let delai = tv.sh("settings get global lowpower_control_delay").unwrap_or_default();
+    match (actif.trim(), delai.trim()) {
+        ("0", _) => "jamais".into(),
+        (_, "86400000") => "24h".into(),
+        _ => "1h".into(),
+    }
+}
+
+/// Coordonnées d'une ville (géocodage Open-Meteo, sans compte).
+pub fn geocoder(ville: &str) -> Result<serde_json::Value, String> {
+    let encode: String = ville
+        .trim()
+        .bytes()
+        .map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") })
+        .collect();
+    let url = format!("https://geocoding-api.open-meteo.com/v1/search?name={encode}&count=1&language=fr&format=json");
+    let octets = adb::telecharger_octets(&url)?;
+    let v: serde_json::Value = serde_json::from_slice(&octets).map_err(|e| e.to_string())?;
+    let r = v["results"].get(0).ok_or(format!("ville introuvable : {ville}"))?;
+    Ok(serde_json::json!({
+        "ville": r["name"],
+        "pays": r["country"],
+        "region": r["admin1"],
+        "latitude": r["latitude"],
+        "longitude": r["longitude"],
+    }))
 }
 
 /// Redémarre la box. `adb reboot` attend que la TV disparaisse (et bloque parfois à travers

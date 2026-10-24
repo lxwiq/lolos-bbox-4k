@@ -2,107 +2,526 @@
   "version": 1,
   "nom": "Bbox 4K (Bouygues Telecom, Arcadyan, Android TV 11)",
   "detection": {
-    "modeles": ["Bouygtel4K"],
-    "fabricants": ["Arcadyan"],
+    "modeles": [
+      "Bouygtel4K"
+    ],
+    "fabricants": [
+      "Arcadyan"
+    ],
     "mdns": "Bouygtel4K"
   },
   "categories": [
-    { "id": "telemetrie", "titre": "Télémétrie", "description": "Statistiques et rapports envoyés à Bouygues et Google. Aucun usage pour vous.", "demander": false },
-    { "id": "publicite", "titre": "Pubs et promos", "description": "Mode démo magasin, astuces, promos, recommandations sponsorisées.", "demander": false },
-    { "id": "streaming", "titre": "Streaming", "description": "Désactivez ceux auxquels vous n'êtes pas abonné.", "demander": true },
-    { "id": "replay", "titre": "Replay des chaînes", "description": "Les chaînes en direct restent disponibles. L'onglet « Replay » de la Bbox ouvre ces applis : désactiver une appli désactive son replay.", "demander": true },
-    { "id": "musique", "titre": "Musique et radio", "description": "", "demander": true },
-    { "id": "vod", "titre": "VOD (location, achat)", "description": "Location de films dans la Bbox et paiement associé.", "demander": true },
-    { "id": "jeux", "titre": "Jeux et extras", "description": "Pleio tourne en arrière-plan en permanence.", "demander": true },
-    { "id": "adulte", "titre": "Contenus adultes", "description": "", "demander": true },
-    { "id": "fonctions", "titre": "Fonctions", "description": "Fonctions de la télécommande et du système.", "demander": true }
+    {
+      "id": "telemetrie",
+      "titre": "Télémétrie",
+      "description": "Statistiques et rapports envoyés à Bouygues et Google. Aucun usage pour vous.",
+      "demander": false
+    },
+    {
+      "id": "publicite",
+      "titre": "Pubs et promos",
+      "description": "Mode démo magasin, astuces, promos, recommandations sponsorisées.",
+      "demander": false
+    },
+    {
+      "id": "streaming",
+      "titre": "Streaming",
+      "description": "Désactivez ceux auxquels vous n'êtes pas abonné.",
+      "demander": true
+    },
+    {
+      "id": "replay",
+      "titre": "Replay des chaînes",
+      "description": "Les chaînes en direct restent disponibles. L'onglet « Replay » de la Bbox ouvre ces applis : désactiver une appli désactive son replay.",
+      "demander": true
+    },
+    {
+      "id": "musique",
+      "titre": "Musique et radio",
+      "description": "",
+      "demander": true
+    },
+    {
+      "id": "vod",
+      "titre": "VOD (location, achat)",
+      "description": "Location de films dans la Bbox et paiement associé.",
+      "demander": true
+    },
+    {
+      "id": "jeux",
+      "titre": "Jeux et extras",
+      "description": "Pleio tourne en arrière-plan en permanence.",
+      "demander": true
+    },
+    {
+      "id": "adulte",
+      "titre": "Contenus adultes",
+      "description": "",
+      "demander": true
+    },
+    {
+      "id": "fonctions",
+      "titre": "Fonctions",
+      "description": "Fonctions de la télécommande et du système.",
+      "demander": true
+    },
+    {
+      "id": "autres",
+      "titre": "Autres applis",
+      "description": "Lecteurs et applis installées en plus.",
+      "demander": true
+    },
+    {
+      "id": "google",
+      "titre": "Composants Google inutilisés",
+      "description": "Ils ne tournent pas : gain de mémoire faible, liste d'applis plus propre.",
+      "demander": true
+    },
+    {
+      "id": "avance",
+      "titre": "Avancé",
+      "description": "À réserver à ceux qui savent ce qu'ils font.",
+      "demander": true
+    }
   ],
   "paquets": [
-    { "id": "fr.bouyguestelecom.tv.sml", "nom": "SML (télémétrie Bouygues)", "categorie": "telemetrie", "defaut": "desactiver", "priorite": 0,
-      "note": "Firebase/Google Analytics, statistiques de démarrage, lecture des journaux. Contient « SpyObject » qui RÉACTIVE toute appli TV désactivée : à désactiver en premier, sinon le reste ne tient pas." },
-    { "id": "com.sfbx.appconsent_bbox", "nom": "Consentement publicitaire (SFBX)", "categorie": "telemetrie", "defaut": "desactiver", "note": "Tournait en arrière-plan (≈25 Mo)." },
-    { "id": "fr.bouyguestelecom.tv.autodiag", "nom": "Autodiagnostic Bouygues", "categorie": "telemetrie", "defaut": "desactiver" },
-    { "id": "fr.bouyguestelecom.tv.tracenetwork", "nom": "Traces réseau Bouygues", "categorie": "telemetrie", "defaut": "desactiver" },
-    { "id": "com.google.android.feedback", "nom": "Rapports Google", "categorie": "telemetrie", "defaut": "desactiver" },
-
-    { "id": "fr.bouyguestelecom.tv.rcbt.showroom", "nom": "Mode démo magasin", "categorie": "publicite", "defaut": "desactiver" },
-    { "id": "fr.bouyguestelecom.tv.astuce", "nom": "Astuces Bbox", "categorie": "publicite", "defaut": "desactiver" },
-    { "id": "fr.bouyguestelecom.tv.startbycanal", "nom": "Promo Start by Canal", "categorie": "publicite", "defaut": "desactiver" },
-    { "id": "fr.bouyguestelecom.tv.shopping", "nom": "Bbox Shopping", "categorie": "publicite", "defaut": "desactiver" },
-    { "id": "com.google.android.tvrecommendations", "nom": "Recommandations Google TV", "categorie": "publicite", "defaut": "desactiver" },
-
-    { "id": "com.netflix.ninja", "nom": "Netflix", "categorie": "streaming", "defaut": "garder", "lies": ["com.marvell.tv.netflix"] },
-    { "id": "com.marvell.tv.netflix", "nom": "Module Netflix (Marvell)", "categorie": "streaming", "defaut": "garder", "cache": true },
-    { "id": "com.disney.disneyplus", "nom": "Disney+", "categorie": "streaming", "defaut": "garder" },
-    { "id": "com.canal.fai", "nom": "myCANAL", "categorie": "streaming", "defaut": "garder", "lies": ["com.canallabs.r7webapp"] },
-    { "id": "com.canallabs.r7webapp", "nom": "Canal+ (webapp)", "categorie": "streaming", "defaut": "garder", "cache": true },
-    { "id": "com.dazn.bouygues", "nom": "DAZN", "categorie": "streaming", "defaut": "garder" },
-    { "id": "com.amazon.amazonvideo.livingroom", "nom": "Prime Video", "categorie": "streaming", "defaut": "garder" },
-    { "id": "tv.arte.plus7.bouygues", "nom": "Arte", "categorie": "replay", "defaut": "garder" },
-
-    { "id": "fr.tf1.mytf1", "nom": "TF1+", "categorie": "replay", "defaut": "garder" },
-    { "id": "fr.m6.m6replay.by", "nom": "M6+", "categorie": "replay", "defaut": "garder" },
-    { "id": "fr.francetv.pluzz.bytel", "nom": "France.tv", "categorie": "replay", "defaut": "garder" },
-    { "id": "com.nextinteractive.rmcbfmplay.tv.bytel", "nom": "RMC BFM Play", "categorie": "replay", "defaut": "desactiver", "note": "Tournait en arrière-plan (≈22 Mo)." },
-    { "id": "lequipe.fr.byt", "nom": "L'Équipe", "categorie": "replay", "defaut": "garder" },
-    { "id": "com.ouestfrance.novoplus.bouygues", "nom": "Novo+", "categorie": "replay", "defaut": "desactiver" },
-
-    { "id": "com.spotify.tv.android", "nom": "Spotify", "categorie": "musique", "defaut": "garder" },
-    { "id": "com.google.android.youtube.tvmusic", "nom": "YouTube Music", "categorie": "musique", "defaut": "garder" },
-    { "id": "com.neosesame.comfm.tv", "nom": "Comfm (radio)", "categorie": "musique", "defaut": "desactiver" },
-    { "id": "com.mobilemediacom.android.playzer", "nom": "Playzer", "categorie": "musique", "defaut": "desactiver" },
-
-    { "id": "fr.filmotv.android.tv.bytel", "nom": "FilmoTV", "categorie": "vod", "defaut": "garder" },
-    { "id": "com.ecinema.tv.bouygues", "nom": "e-cinéma", "categorie": "vod", "defaut": "garder" },
-    { "id": "com.cashlog.byt.payments", "nom": "Paiement Cashlog", "categorie": "vod", "defaut": "garder", "note": "Utilisé pour payer les locations." },
-
-    { "id": "com.netgem.pleio.bouyguestel", "nom": "Pleio", "categorie": "jeux", "defaut": "desactiver", "note": "Tournait en arrière-plan.", "lies": ["games.pleio.bt_fr"] },
-    { "id": "games.pleio.bt_fr", "nom": "Pleio jeux", "categorie": "jeux", "defaut": "desactiver", "cache": true },
-    { "id": "com.google.android.play.games", "nom": "Google Play Jeux", "categorie": "jeux", "defaut": "desactiver" },
-    { "id": "tv.pluto.android.bytel", "nom": "Pluto TV", "categorie": "jeux", "defaut": "desactiver" },
-    { "id": "com.google.android.videos", "nom": "Google TV (films)", "categorie": "jeux", "defaut": "desactiver" },
-    { "id": "fr.tfou.max", "nom": "TFou Max", "categorie": "jeux", "defaut": "garder" },
-
-    { "id": "com.bbox.dorcel", "nom": "Dorcel", "categorie": "adulte", "defaut": "desactiver" },
-    { "id": "com.bbox.dorcelclub", "nom": "Dorcel Club", "categorie": "adulte", "defaut": "desactiver" },
-    { "id": "com.bbox.vixen", "nom": "Vixen", "categorie": "adulte", "defaut": "desactiver" },
-    { "id": "com.catchup.europe.playboytv", "nom": "Playboy TV", "categorie": "adulte", "defaut": "desactiver" },
-
-    { "id": "com.google.android.katniss", "nom": "Assistant Google / recherche vocale", "categorie": "fonctions", "defaut": "garder", "note": "Bouton micro de la télécommande." },
-    { "id": "com.google.android.apps.mediashell", "nom": "Chromecast intégré", "categorie": "fonctions", "defaut": "garder", "note": "Caster depuis un téléphone (≈30 Mo en fond)." },
-    { "id": "com.rsupport.rs.activity.rsupport.bg", "nom": "Assistance à distance Bouygues", "categorie": "fonctions", "defaut": "desactiver", "note": "Un technicien peut prendre la main sur la TV.", "lies": ["com.rsupport.rsperm.as.a2th"] },
-    { "id": "com.rsupport.rsperm.as.a2th", "nom": "Permissions assistance à distance", "categorie": "fonctions", "defaut": "desactiver", "cache": true }
+    {
+      "id": "fr.bouyguestelecom.tv.sml",
+      "nom": "SML (télémétrie Bouygues)",
+      "categorie": "telemetrie",
+      "defaut": "desactiver",
+      "priorite": 0,
+      "note": "Firebase/Google Analytics, statistiques de démarrage, lecture des journaux. Contient « SpyObject » qui RÉACTIVE toute appli TV désactivée : à désactiver en premier, sinon le reste ne tient pas."
+    },
+    {
+      "id": "com.sfbx.appconsent_bbox",
+      "nom": "Consentement publicitaire (SFBX)",
+      "categorie": "telemetrie",
+      "defaut": "desactiver",
+      "note": "Tournait en arrière-plan (≈25 Mo)."
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.autodiag",
+      "nom": "Autodiagnostic Bouygues",
+      "categorie": "telemetrie",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.tracenetwork",
+      "nom": "Traces réseau Bouygues",
+      "categorie": "telemetrie",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.google.android.feedback",
+      "nom": "Rapports Google",
+      "categorie": "telemetrie",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.rcbt.showroom",
+      "nom": "Mode démo magasin",
+      "categorie": "publicite",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.astuce",
+      "nom": "Astuces Bbox",
+      "categorie": "publicite",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.startbycanal",
+      "nom": "Promo Start by Canal",
+      "categorie": "publicite",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.bouyguestelecom.tv.shopping",
+      "nom": "Bbox Shopping",
+      "categorie": "publicite",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.google.android.tvrecommendations",
+      "nom": "Recommandations Google TV",
+      "categorie": "publicite",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.netflix.ninja",
+      "nom": "Netflix",
+      "categorie": "streaming",
+      "defaut": "garder",
+      "lies": [
+        "com.marvell.tv.netflix"
+      ]
+    },
+    {
+      "id": "com.marvell.tv.netflix",
+      "nom": "Module Netflix (Marvell)",
+      "categorie": "streaming",
+      "defaut": "garder",
+      "cache": true
+    },
+    {
+      "id": "com.disney.disneyplus",
+      "nom": "Disney+",
+      "categorie": "streaming",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.canal.fai",
+      "nom": "myCANAL",
+      "categorie": "streaming",
+      "defaut": "garder",
+      "lies": [
+        "com.canallabs.r7webapp"
+      ]
+    },
+    {
+      "id": "com.canallabs.r7webapp",
+      "nom": "Canal+ (webapp)",
+      "categorie": "streaming",
+      "defaut": "garder",
+      "cache": true
+    },
+    {
+      "id": "com.dazn.bouygues",
+      "nom": "DAZN",
+      "categorie": "streaming",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.amazon.amazonvideo.livingroom",
+      "nom": "Prime Video",
+      "categorie": "streaming",
+      "defaut": "garder"
+    },
+    {
+      "id": "tv.arte.plus7.bouygues",
+      "nom": "Arte",
+      "categorie": "replay",
+      "defaut": "garder"
+    },
+    {
+      "id": "fr.tf1.mytf1",
+      "nom": "TF1+",
+      "categorie": "replay",
+      "defaut": "garder"
+    },
+    {
+      "id": "fr.m6.m6replay.by",
+      "nom": "M6+",
+      "categorie": "replay",
+      "defaut": "garder"
+    },
+    {
+      "id": "fr.francetv.pluzz.bytel",
+      "nom": "France.tv",
+      "categorie": "replay",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.nextinteractive.rmcbfmplay.tv.bytel",
+      "nom": "RMC BFM Play",
+      "categorie": "replay",
+      "defaut": "desactiver",
+      "note": "Tournait en arrière-plan (≈22 Mo)."
+    },
+    {
+      "id": "lequipe.fr.byt",
+      "nom": "L'Équipe",
+      "categorie": "replay",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.ouestfrance.novoplus.bouygues",
+      "nom": "Novo+",
+      "categorie": "replay",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.spotify.tv.android",
+      "nom": "Spotify",
+      "categorie": "musique",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.google.android.youtube.tvmusic",
+      "nom": "YouTube Music",
+      "categorie": "musique",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.neosesame.comfm.tv",
+      "nom": "Comfm (radio)",
+      "categorie": "musique",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.mobilemediacom.android.playzer",
+      "nom": "Playzer",
+      "categorie": "musique",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.filmotv.android.tv.bytel",
+      "nom": "FilmoTV",
+      "categorie": "vod",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.ecinema.tv.bouygues",
+      "nom": "e-cinéma",
+      "categorie": "vod",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.cashlog.byt.payments",
+      "nom": "Paiement Cashlog",
+      "categorie": "vod",
+      "defaut": "garder",
+      "note": "Utilisé pour payer les locations."
+    },
+    {
+      "id": "com.netgem.pleio.bouyguestel",
+      "nom": "Pleio",
+      "categorie": "jeux",
+      "defaut": "desactiver",
+      "note": "Tournait en arrière-plan.",
+      "lies": [
+        "games.pleio.bt_fr"
+      ]
+    },
+    {
+      "id": "games.pleio.bt_fr",
+      "nom": "Pleio jeux",
+      "categorie": "jeux",
+      "defaut": "desactiver",
+      "cache": true
+    },
+    {
+      "id": "com.google.android.play.games",
+      "nom": "Google Play Jeux",
+      "categorie": "jeux",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "tv.pluto.android.bytel",
+      "nom": "Pluto TV",
+      "categorie": "jeux",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.google.android.videos",
+      "nom": "Google TV (films)",
+      "categorie": "jeux",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "fr.tfou.max",
+      "nom": "TFou Max",
+      "categorie": "jeux",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.bbox.dorcel",
+      "nom": "Dorcel",
+      "categorie": "adulte",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.bbox.dorcelclub",
+      "nom": "Dorcel Club",
+      "categorie": "adulte",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.bbox.vixen",
+      "nom": "Vixen",
+      "categorie": "adulte",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.catchup.europe.playboytv",
+      "nom": "Playboy TV",
+      "categorie": "adulte",
+      "defaut": "desactiver"
+    },
+    {
+      "id": "com.google.android.katniss",
+      "nom": "Assistant Google / recherche vocale",
+      "categorie": "fonctions",
+      "defaut": "garder",
+      "note": "Bouton micro de la télécommande."
+    },
+    {
+      "id": "com.google.android.apps.mediashell",
+      "nom": "Chromecast intégré",
+      "categorie": "fonctions",
+      "defaut": "garder",
+      "note": "Caster depuis un téléphone (≈30 Mo en fond)."
+    },
+    {
+      "id": "com.rsupport.rs.activity.rsupport.bg",
+      "nom": "Assistance à distance Bouygues",
+      "categorie": "fonctions",
+      "defaut": "desactiver",
+      "note": "Un technicien peut prendre la main sur la TV.",
+      "lies": [
+        "com.rsupport.rsperm.as.a2th"
+      ]
+    },
+    {
+      "id": "com.rsupport.rsperm.as.a2th",
+      "nom": "Permissions assistance à distance",
+      "categorie": "fonctions",
+      "defaut": "desactiver",
+      "cache": true
+    },
+    {
+      "id": "org.videolan.vlc",
+      "nom": "VLC",
+      "categorie": "autres",
+      "defaut": "garder",
+      "note": "Reste en mémoire après usage (≈ 10 Mo)."
+    },
+    {
+      "id": "com.google.android.backdrop",
+      "nom": "Ambient Mode (écran de veille Google)",
+      "categorie": "google",
+      "defaut": "garder",
+      "note": "Remplacé par l'écran de veille Lol'OS."
+    },
+    {
+      "id": "com.android.printspooler",
+      "nom": "Impression",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.google.android.syncadapters.calendar",
+      "nom": "Synchro de l'agenda Google",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.google.android.tts",
+      "nom": "Synthèse vocale Google",
+      "categorie": "google",
+      "defaut": "garder",
+      "note": "Nécessaire au lecteur d'écran TalkBack."
+    },
+    {
+      "id": "com.google.android.apps.nbu.smartconnect.tv",
+      "nom": "Smart Connect",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.android.bluetoothmidiservice",
+      "nom": "Bluetooth MIDI",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.android.htmlviewer",
+      "nom": "Visionneuse HTML",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "com.android.dreams.basic",
+      "nom": "Écran de veille de base",
+      "categorie": "google",
+      "defaut": "garder"
+    },
+    {
+      "id": "fr.bouyguestelecom.agent.custo",
+      "nom": "Agent de personnalisation Bouygues",
+      "categorie": "avance",
+      "defaut": "garder",
+      "note": "Réinstalle silencieusement les applis du bouquet. Le bloquer peut empêcher des mises à jour d'applis Bbox poussées hors firmware."
+    }
   ],
   "proteges": {
     "note": "Jamais désactivés : chaînes TV, guide, DRM, décodage, télécommande, éligibilité TV, mises à jour, services Google de base.",
     "paquets": [
-      "fr.bouyguestelecom.tv.bbui", "com.rtrk.comedia.service", "fr.bouyguestelecom.tv.partners.channelapps",
-      "fr.bouyguestelecom.bboxapi", "fr.bouyguestelecom.tv.remotecontrol", "fr.bouyguestelecom.tv.setup",
-      "fr.bouyguestelecom.stb.permissions", "fr.bouyguestelecom.tv.power", "fr.bouyguestelecom.tv.bachat",
-      "fr.bouyguestelecom.tv.miamivices", "fr.bouyguestelecom.agent.custo", "insight.tr069.client",
-      "android.autoinstalls.config.bouyguestelecom.device", "com.synaptics.hdrhandler",
-      "com.marvell.audio.loopback", "com.marvell.onetouchplay", "com.marvell.power.shutdownreceiver", "com.marvell.wol",
-      "com.android.vending", "com.google.android.gms", "com.google.android.gsf", "com.google.android.webview",
-      "com.google.android.tungsten.setupwraith", "com.google.android.tv.remote.service",
-      "com.android.tv.settings", "com.android.providers.tv", "com.google.android.youtube.tv"
+      "fr.bouyguestelecom.tv.bbui",
+      "com.rtrk.comedia.service",
+      "fr.bouyguestelecom.tv.partners.channelapps",
+      "fr.bouyguestelecom.bboxapi",
+      "fr.bouyguestelecom.tv.remotecontrol",
+      "fr.bouyguestelecom.tv.setup",
+      "fr.bouyguestelecom.stb.permissions",
+      "fr.bouyguestelecom.tv.power",
+      "fr.bouyguestelecom.tv.bachat",
+      "fr.bouyguestelecom.tv.miamivices",
+      "insight.tr069.client",
+      "android.autoinstalls.config.bouyguestelecom.device",
+      "com.synaptics.hdrhandler",
+      "com.marvell.audio.loopback",
+      "com.marvell.onetouchplay",
+      "com.marvell.power.shutdownreceiver",
+      "com.marvell.wol",
+      "com.android.vending",
+      "com.google.android.gms",
+      "com.google.android.gsf",
+      "com.google.android.webview",
+      "com.google.android.tungsten.setupwraith",
+      "com.google.android.tv.remote.service",
+      "com.android.tv.settings",
+      "com.android.providers.tv",
+      "com.google.android.youtube.tv"
     ]
   },
   "reglages": [
-    { "ns": "global", "cle": "window_animation_scale", "valeur": "0.5", "pourquoi": "Animations 2× plus rapides" },
-    { "ns": "global", "cle": "transition_animation_scale", "valeur": "0.5", "pourquoi": "Animations 2× plus rapides" },
-    { "ns": "global", "cle": "animator_duration_scale", "valeur": "0.5", "pourquoi": "Animations 2× plus rapides" },
-    { "ns": "global", "cle": "send_action_app_error", "valeur": "0", "pourquoi": "Plus de rapports d'erreur envoyés à Google" }
+    {
+      "ns": "global",
+      "cle": "window_animation_scale",
+      "valeur": "0.5",
+      "pourquoi": "Animations 2× plus rapides"
+    },
+    {
+      "ns": "global",
+      "cle": "transition_animation_scale",
+      "valeur": "0.5",
+      "pourquoi": "Animations 2× plus rapides"
+    },
+    {
+      "ns": "global",
+      "cle": "animator_duration_scale",
+      "valeur": "0.5",
+      "pourquoi": "Animations 2× plus rapides"
+    },
+    {
+      "ns": "global",
+      "cle": "send_action_app_error",
+      "valeur": "0",
+      "pourquoi": "Plus de rapports d'erreur envoyés à Google"
+    }
   ],
   "reglages_sauvegardes": [
-    "global/window_animation_scale", "global/transition_animation_scale", "global/animator_duration_scale",
-    "global/send_action_app_error", "global/private_dns_mode", "global/private_dns_specifier",
-    "secure/screensaver_enabled", "secure/screensaver_components", "secure/screensaver_default_component"
+    "global/window_animation_scale",
+    "global/transition_animation_scale",
+    "global/animator_duration_scale",
+    "global/send_action_app_error",
+    "global/private_dns_mode",
+    "global/private_dns_specifier",
+    "secure/screensaver_enabled",
+    "secure/screensaver_components",
+    "secure/screensaver_default_component",
+    "global/lowpower_control_enabled",
+    "global/lowpower_control_delay"
   ],
   "accueil": {
     "paquet": "fr.accueil.tv",
     "activite": "fr.accueil.tv/.MainActivity",
     "ecran_veille": "fr.accueil.tv/.Screensaver",
-    "appops": ["SYSTEM_ALERT_WINDOW"],
+    "appops": [
+      "SYSTEM_ALERT_WINDOW"
+    ],
     "dossier_fonds": "/sdcard/Android/data/fr.accueil.tv/files/fonds",
     "accueil_origine": "fr.bouyguestelecom.tv.bbui/.ui.live.LiveActivity"
   },

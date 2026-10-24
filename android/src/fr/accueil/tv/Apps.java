@@ -67,7 +67,7 @@ final class Apps {
         byKey.put(e.key, e);
     }
 
-    static Apps load(Context context) {
+    static Apps load(Context context, boolean infosSysteme) {
         PackageManager pm = context.getPackageManager();
         Apps apps = new Apps();
 
@@ -92,6 +92,9 @@ final class Apps {
                     0xFF3F3F46, 0xFF18181B));
             apps.add(special("@veille", "Mettre en veille", new Intent(power).setAction(POWER + ".GO_TO_SLEEP"),
                     0xFF27272A, 0xFF09090B));
+        }
+        if (infosSysteme) {
+            apps.add(special("@infos", "Infos système", new Intent(), 0xFF0F766E, 0xFF042F2E));
         }
         apps.add(special("@settings", "Réglages",
                 new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),

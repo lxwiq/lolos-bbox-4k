@@ -273,10 +273,15 @@ async fn diagnostic_reseau(ip: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn lire_personnalisation(etat: State<'_, Appli>) -> Result<serde_json::Value, String> {
+    let (adb, serie) = etat.contexte()?;
+    let profil = etat.profil.clone();
+    en_fond(move || Ok(operations::lire_personnalisation(&Tv { adb: &adb, serie: &serie }, &profil))).await
+}
+
+#[tauri::command]
 async fn personnaliser(
-    salutation: String,
-    demarrage: bool,
-    message_demarrage: String,
+    config: serde_json::Value,
     logo_base64: Option<String>,
     apercu: bool,
     app: AppHandle,
@@ -294,12 +299,66 @@ async fn personnaliser(
                 .map_err(|e| format!("image illisible : {e}"))?,
         ),
     };
-    let perso = operations::Perso { salutation, demarrage, message_demarrage, logo };
     en_fond(move || {
         let j = |m: String| journal(&app, &dossier, m);
-        operations::personnaliser(&Tv { adb: &adb, serie: &serie }, &profil, &dossier, &perso, apercu, &j)
+        operations::personnaliser(&Tv { adb: &adb, serie: &serie }, &profil, &dossier, &config, logo, apercu, &j)
     })
     .await
+}
+
+/// Fenêtre native de choix de fichiers (photos, vidéos) puis envoi sur la TV.
+#[tauri::command]
+async fn ajouter_fonds(app: AppHandle, etat: State<'_, Appli>) -> Result<usize, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (adb, serie) = etat.contexte()?;
+    let (profil, dossier) = (etat.profil.clone(), etat.dossier.clone());
+    let choix = app
+        .dialog()
+        .file()
+        .set_title("Vos fonds d'écran (photos ou vidéos)")
+        .add_filter("Photos et vidéos", &["mp4", "jpg", "jpeg", "png"])
+        .blocking_pick_files();
+    let Some(choix) = choix else { return Ok(0) };
+    let chemins: Vec<PathBuf> = choix.into_iter().filter_map(|f| f.into_path().ok()).collect();
+    en_fond(move || {
+        let j = |m: String| journal(&app, &dossier, m);
+        operations::envoyer_fonds(&Tv { adb: &adb, serie: &serie }, &profil, &chemins, &j)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn lister_fonds(etat: State<'_, Appli>) -> Result<Vec<operations::Fond>, String> {
+    let (adb, serie) = etat.contexte()?;
+    let profil = etat.profil.clone();
+    en_fond(move || operations::lister_fonds(&Tv { adb: &adb, serie: &serie }, &profil)).await
+}
+
+#[tauri::command]
+async fn retirer_fonds(noms: Vec<String>, etat: State<'_, Appli>) -> Result<(), String> {
+    let (adb, serie) = etat.contexte()?;
+    let profil = etat.profil.clone();
+    en_fond(move || operations::retirer_fonds(&Tv { adb: &adb, serie: &serie }, &profil, &noms)).await
+}
+
+#[tauri::command]
+async fn veille(mode: Option<String>, app: AppHandle, etat: State<'_, Appli>) -> Result<String, String> {
+    let (adb, serie) = etat.contexte()?;
+    let dossier = etat.dossier.clone();
+    en_fond(move || {
+        let tv = Tv { adb: &adb, serie: &serie };
+        if let Some(m) = mode {
+            let j = |t: String| journal(&app, &dossier, t);
+            operations::regler_veille(&tv, &m, &j)?;
+        }
+        Ok(operations::lire_veille(&tv))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn geocoder(ville: String) -> Result<serde_json::Value, String> {
+    en_fond(move || operations::geocoder(&ville)).await
 }
 
 #[tauri::command]
@@ -401,6 +460,7 @@ fn dossier_donnees(etat: State<Appli>) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dossier = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dossier)?;
@@ -432,6 +492,12 @@ pub fn run() {
             diagnostic_reseau,
             ouvrir_reglages_reseau_local,
             personnaliser,
+            lire_personnalisation,
+            ajouter_fonds,
+            lister_fonds,
+            retirer_fonds,
+            veille,
+            geocoder,
             redemarrer_box,
             verifier_mise_a_jour,
             installer_mise_a_jour,

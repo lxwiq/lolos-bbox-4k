@@ -9,6 +9,7 @@ import android.view.Gravity;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextClock;
 
 /** Écran de veille « Paysages » : les mêmes vidéos que l'accueil, avec l'heure. */
@@ -35,9 +36,11 @@ public class Screensaver extends DreamService {
         float d = getResources().getDisplayMetrics().density;
         FrameLayout root = new FrameLayout(this);
         SurfaceView surface = new SurfaceView(this);
+        ImageView photo = new ImageView(this);
         View curtain = new View(this);
         curtain.setBackgroundColor(Color.BLACK);
         root.addView(surface, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(photo, new FrameLayout.LayoutParams(-1, -1));
         root.addView(curtain, new FrameLayout.LayoutParams(-1, -1));
 
         TextClock clock = new TextClock(this);
@@ -52,7 +55,9 @@ public class Screensaver extends DreamService {
         root.addView(clock, lp);
 
         setContentView(root);
-        wallpaper = new Wallpaper(this, surface, curtain, "ecran_veille");
+        wallpaper = new Wallpaper(this, surface, photo, curtain, "ecran_veille");
+        Personnalisation perso = Personnalisation.charger(this);
+        wallpaper.setFiltre(f -> MainActivity.fondAutorise(f, perso));
     }
 
     @Override

@@ -364,13 +364,44 @@ $("#acc-installer").addEventListener("click", (e) =>
   })
 );
 
-// ------------------------------------------------------------------ 7. personnaliser
+// ------------------------------------------------------------------ 7. personnaliser et 8. options
 
 etat.logo = undefined; // undefined : inchangé · "" : logo Lol'OS · data:image/png… : image choisie
+etat.perso = null;     // configuration lue sur la TV (docs/personnalisation.md)
 
-for (const [id, cle] of [["#perso-salut", "salut"], ["#perso-message", "message"]]) {
-  try { $(id).value = localStorage.getItem("perso-" + cle) || ""; } catch {}
-  $(id).addEventListener("input", (e) => { try { localStorage.setItem("perso-" + cle, e.target.value); } catch {} });
+/** Lit la configuration de la TV une fois, et remplit les deux pages. */
+async function chargerPerso() {
+  if (!etat.connecte || etat.perso) return;
+  etat.perso = await invoke("lire_personnalisation");
+  const p = etat.perso;
+  $("#perso-salut").value = p.salutation ?? "";
+  $("#perso-message").value = p.message_demarrage ?? "";
+  $("#perso-demarrage").checked = p.demarrage ?? true;
+  $("#perso-paysages").checked = p.fonds_lolos ?? true;
+  $("#perso-nuit").checked = !!p.mode_nuit;
+  $("#opt-nettoyage").checked = !!p.nettoyage_memoire;
+  $("#opt-infos").checked = !!p.infos_systeme;
+  afficherMeteo(p.meteo);
+  const mode = await invoke("veille", { mode: null });
+  document.querySelectorAll('input[name="veille"]').forEach((r) => (r.checked = r.value === mode));
+}
+
+entrees.personnaliser = async () => { await chargerPerso(); listerFonds(); };
+entrees.options = chargerPerso;
+
+function configCourante() {
+  return {
+    ...(etat.perso || {}),
+    salutation: $("#perso-salut").value.trim(),
+    demarrage: $("#perso-demarrage").checked,
+    message_demarrage: $("#perso-message").value.trim(),
+    duree_demarrage_ms: etat.perso?.duree_demarrage_ms ?? 2500,
+    fonds_lolos: $("#perso-paysages").checked,
+    mode_nuit: $("#perso-nuit").checked,
+    meteo: etat.perso?.meteo ?? null,
+    nettoyage_memoire: $("#opt-nettoyage").checked,
+    infos_systeme: $("#opt-infos").checked,
+  };
 }
 
 /** Image choisie → PNG d'au plus 720 px, pour ne pas surcharger la box. */
@@ -402,29 +433,107 @@ $("#perso-defaut").addEventListener("click", () => {
   $("#perso-fichier").value = "";
 });
 
-async function envoyerPerso(apercu) {
+// --- vos fonds
+
+async function listerFonds() {
+  if (!etat.connecte) return;
+  const ul = $("#fonds-liste");
+  const fonds = await invoke("lister_fonds");
+  ul.textContent = "";
+  if (!fonds.length) {
+    ul.innerHTML = '<li class="vide">Aucun fond à vous pour l\'instant.</li>';
+    return;
+  }
+  for (const f of fonds) {
+    const li = document.createElement("li");
+    const nom = Object.assign(document.createElement("span"), { textContent: f.nom.replace(/^perso-/, "") });
+    const taille = Object.assign(document.createElement("span"), { className: "petit", textContent: f.taille_mo + " Mo" });
+    const retirer = Object.assign(document.createElement("button"), { textContent: "Retirer" });
+    retirer.addEventListener("click", (e) =>
+      occupe(e.target, async () => {
+        await invoke("retirer_fonds", { noms: [f.nom] });
+        journal("Fond retiré : " + f.nom);
+        listerFonds();
+      })
+    );
+    li.append(nom, taille, retirer);
+    ul.append(li);
+  }
+}
+
+$("#fonds-ajouter").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    if (!etat.connecte) return journal("⚠️ Connectez d'abord la TV.");
+    try {
+      const n = await invoke("ajouter_fonds");
+      if (n) listerFonds();
+    } catch (err) {
+      journal("Erreur : " + err);
+    }
+  })
+);
+
+// --- météo
+
+function afficherMeteo(m) {
+  $("#meteo-resultat").textContent = m ? `Météo de ${m.ville}${m.pays ? " (" + [m.region, m.pays].filter(Boolean).join(", ") + ")" : ""}.` : "Pas de météo.";
+  if (m) $("#meteo-ville").value = m.ville;
+}
+
+$("#meteo-chercher").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    const ville = $("#meteo-ville").value.trim();
+    if (!ville) return;
+    try {
+      const m = await invoke("geocoder", { ville });
+      etat.perso = { ...(etat.perso || {}), meteo: { ville: m.ville, latitude: m.latitude, longitude: m.longitude } };
+      afficherMeteo({ ...m });
+    } catch (err) {
+      $("#meteo-resultat").textContent = "⚠️ " + err;
+    }
+  })
+);
+
+$("#meteo-retirer").addEventListener("click", () => {
+  etat.perso = { ...(etat.perso || {}), meteo: null };
+  $("#meteo-ville").value = "";
+  afficherMeteo(null);
+});
+
+// --- enregistrement
+
+async function envoyerPerso(apercu, suite) {
   if (!etat.connecte) {
     journal("⚠️ Connectez d'abord la TV (étape « Trouver la TV »).");
     return aller("tv");
   }
   try {
-    await invoke("personnaliser", {
-      salutation: $("#perso-salut").value.trim(),
-      demarrage: $("#perso-demarrage").checked,
-      messageDemarrage: $("#perso-message").value.trim(),
-      logoBase64: etat.logo ?? null,
-      apercu,
-    });
-    if (!apercu) {
-      faite("personnaliser");
-      aller("verification");
-    }
+    const config = configCourante();
+    await invoke("personnaliser", { config, logoBase64: etat.logo ?? null, apercu });
+    etat.perso = config;
+    etat.logo = undefined;
+    if (suite) aller(suite);
   } catch (err) {
     journal("Erreur : " + err);
   }
 }
 $("#perso-apercu").addEventListener("click", (e) => occupe(e.target, () => envoyerPerso(true)));
-$("#perso-enregistrer").addEventListener("click", (e) => occupe(e.target, () => envoyerPerso(false)));
+$("#perso-enregistrer").addEventListener("click", (e) =>
+  occupe(e.target, async () => { await envoyerPerso(false, "options"); faite("personnaliser"); })
+);
+$("#opt-enregistrer").addEventListener("click", (e) =>
+  occupe(e.target, async () => {
+    if (!etat.connecte) return journal("⚠️ Connectez d'abord la TV.");
+    const mode = document.querySelector('input[name="veille"]:checked')?.value || "1h";
+    try {
+      await invoke("veille", { mode });
+    } catch (err) {
+      return journal("Erreur : " + err);
+    }
+    await envoyerPerso(false, "verification");
+    faite("options");
+  })
+);
 
 // ------------------------------------------------------------------ redémarrage
 

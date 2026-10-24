@@ -267,6 +267,13 @@ ol.pas b { color: var(--texte); font-weight: 600; }
 }
 .bouton-fichier:hover { background: var(--discret); }
 
+.liste.fonds { margin: 10px 0 12px; }
+.liste.fonds li { cursor: default; }
+.liste.fonds li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.liste.fonds li.vide { color: var(--texte-discret); border-style: dashed; }
+.liste.fonds li:hover { background: transparent; }
+input[type="radio"] { width: 16px; height: 16px; min-width: 0; padding: 0; margin: 2px 0 0; flex: none; accent-color: var(--primaire); }
+
 /* --- vérification --- */
 .infos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin: 10px 0 16px; }
 .info { border: 1px solid var(--bord); border-radius: var(--rayon); padding: 10px 12px; font-weight: 500; }

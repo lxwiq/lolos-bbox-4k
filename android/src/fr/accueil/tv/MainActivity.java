@@ -1,6 +1,7 @@
 package fr.accueil.tv;
 
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
@@ -14,6 +15,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.StatFs;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -33,7 +36,24 @@ import android.widget.TextClock;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
 import java.util.Collections;
 import java.util.List;
 
@@ -62,7 +82,11 @@ public class MainActivity extends Activity {
     private TextView gridTitle, hint;
     private View dim, scrim, topScrim, clock;
     private FrameLayout racine;
-    private TextView salut;
+    private TextView salut, meteo;
+    private View voileNuit;
+    private String meteoTexte;
+    private long meteoHeure;
+    private boolean infosAffichees;
     private Personnalisation perso;
     private boolean demarrageMontre;
 
@@ -82,6 +106,12 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             wallpaper.next();
+            // Rester sur l'accueil au passage de 21 h ou de midi : mode nuit, salutation et météo suivent
+            if (perso != null) {
+                voileNuit.animate().alpha(perso.nuit() ? 0.35f : 0f).setDuration(1500);
+                salut.setText(Personnalisation.avecMoment(perso.salutation));
+                if (perso.meteoVille != null) actualiserMeteo();
+            }
             handler.postDelayed(this, ROTATE_MS);
         }
     };
@@ -115,7 +145,9 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("accueil", MODE_PRIVATE);
         loadDock();
         buildUi();
-        apps = Apps.load(this);
+        perso = Personnalisation.charger(this);
+        infosAffichees = perso.infosSysteme;
+        apps = Apps.load(this, infosAffichees);
         renderAll();
         scroll.post(this::focusDock);
         if (getIntent().getBooleanExtra(APERCU_DEMARRAGE, false)) {
@@ -198,11 +230,19 @@ public class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
 
         SurfaceView surface = new SurfaceView(this);
+        ImageView photo = new ImageView(this);
         View curtain = new View(this);
         curtain.setBackgroundColor(Color.BLACK);
         root.addView(surface, match());
+        root.addView(photo, match());
         root.addView(curtain, match());
-        wallpaper = new Wallpaper(this, surface, curtain, "accueil");
+        wallpaper = new Wallpaper(this, surface, photo, curtain, "accueil");
+
+        // Mode nuit : le paysage s'assombrit le soir
+        voileNuit = new View(this);
+        voileNuit.setBackgroundColor(Color.BLACK);
+        voileNuit.setAlpha(0f);
+        root.addView(voileNuit, match());
 
         scrim = new View(this);
         scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -275,6 +315,10 @@ public class MainActivity extends Activity {
         styleOverlayText(date, 14, "sans-serif", 0xCCFFFFFF);
         clockBox.addView(time);
         clockBox.addView(date);
+        meteo = new TextView(this);
+        styleOverlayText(meteo, 14, "sans-serif", 0xCCFFFFFF);
+        meteo.setVisibility(View.GONE);
+        clockBox.addView(meteo);
         FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
         cl.setMargins(0, dp(26), dp(SIDE), 0);
         root.addView(clockBox, cl);
@@ -378,6 +422,17 @@ public class MainActivity extends Activity {
 
     private void appliquerPersonnalisation() {
         perso = Personnalisation.charger(this);
+        if (perso.infosSysteme != infosAffichees) {
+            infosAffichees = perso.infosSysteme;
+            reloadApps();
+        }
+        final Personnalisation p = perso;
+        wallpaper.setFiltre(f -> fondAutorise(f, p));
+        voileNuit.animate().alpha(perso.nuit() ? 0.35f : 0f).setDuration(600);
+        if (perso.meteoVille == null) meteo.setVisibility(View.GONE);
+        else actualiserMeteo();
+        handler.removeCallbacks(nettoyer);
+        if (perso.nettoyageMemoire) handler.postDelayed(nettoyer, 3000);
         String texte = Personnalisation.avecMoment(perso.salutation);
         salut.setText(texte);
         salut.setVisibility(texte.isEmpty() ? View.GONE : View.VISIBLE);
@@ -385,6 +440,117 @@ public class MainActivity extends Activity {
         if (!demarrageMontre && perso.demarrage && SystemClock.elapsedRealtime() < 10 * 60_000) {
             demarrageMontre = true;
             montrerDemarrage();
+        }
+    }
+
+    /** Vos fonds (perso-*) toujours ; paysages Lol'OS si autorisés ; la nuit, seulement les calmes. */
+    static boolean fondAutorise(File f, Personnalisation p) {
+        String n = f.getName().toLowerCase(Locale.ROOT);
+        if (n.startsWith("perso-")) return true;
+        if (!p.fondsLolos) return false;
+        return !p.nuit() || n.contains("aurore") || n.contains("riviere") || n.contains("ocean") || n.contains("nuit");
+    }
+
+    /** Ferme les applis restées en arrière-plan (sauf TV en direct, Chromecast, YouTube). */
+    private final Runnable nettoyer = () -> {
+        ActivityManager am = getSystemService(ActivityManager.class);
+        Set<String> epargnees = new HashSet<>(Arrays.asList(Apps.BBUI, "com.google.android.apps.mediashell",
+                "com.google.android.youtube.tv", getPackageName()));
+        for (Apps.Entry e : apps.all) {
+            if (e.packageName != null && !epargnees.contains(e.packageName)) am.killBackgroundProcesses(e.packageName);
+        }
+    };
+
+    /** Météo du jour (Open-Meteo, sans compte), au plus une requête par demi-heure. */
+    private void actualiserMeteo() {
+        if (meteoTexte != null) {
+            meteo.setText(meteoTexte);
+            meteo.setVisibility(View.VISIBLE);
+            if (System.currentTimeMillis() - meteoHeure < 30 * 60_000) return;
+        }
+        final double lat = perso.latitude, lon = perso.longitude;
+        final String ville = perso.meteoVille;
+        new Thread(() -> {
+            try {
+                URL url = new URL(String.format(Locale.ROOT,
+                        "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+                                + "&current=temperature_2m,weather_code,is_day&timezone=auto", lat, lon));
+                HttpURLConnection c = (HttpURLConnection) url.openConnection();
+                c.setConnectTimeout(8000);
+                c.setReadTimeout(8000);
+                JSONObject actuel = new JSONObject(lire(c.getInputStream())).getJSONObject("current");
+                int code = actuel.getInt("weather_code");
+                String texte = Meteo.symbole(code, actuel.optInt("is_day", 1) == 1) + "  "
+                        + Math.round(actuel.getDouble("temperature_2m")) + "°  " + Meteo.libelle(code)
+                        + (ville.isEmpty() ? "" : " · " + ville);
+                handler.post(() -> {
+                    meteoTexte = texte;
+                    meteoHeure = System.currentTimeMillis();
+                    if (perso.meteoVille == null) return;
+                    meteo.setText(texte);
+                    meteo.setVisibility(View.VISIBLE);
+                });
+            } catch (Exception ignored) {
+                // pas de réseau : on réessaiera au prochain retour à l'accueil
+            }
+        }).start();
+    }
+
+    private static String lire(InputStream flux) throws java.io.IOException {
+        ByteArrayOutputStream tampon = new ByteArrayOutputStream();
+        byte[] morceau = new byte[4096];
+        for (int n; (n = flux.read(morceau)) > 0; ) tampon.write(morceau, 0, n);
+        flux.close();
+        return tampon.toString(StandardCharsets.UTF_8.name());
+    }
+
+    /** Tuile « Infos système » : de quoi dépanner sans brancher d'ordinateur. */
+    private void afficherInfos() {
+        ActivityManager am = getSystemService(ActivityManager.class);
+        ActivityManager.MemoryInfo memoire = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(memoire);
+        StatFs disque = new StatFs(Environment.getDataDirectory().getPath());
+        String version;
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            version = "?";
+        }
+        long minutes = SystemClock.elapsedRealtime() / 60_000;
+        String texte = "Lol'OS " + version + "\n"
+                + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " · Android " + android.os.Build.VERSION.RELEASE + "\n\n"
+                + "Mémoire libre : " + memoire.availMem / 1_048_576 + " Mo sur " + memoire.totalMem / 1_048_576 + " Mo\n"
+                + "Stockage libre : " + disque.getAvailableBytes() / 1_073_741_824 + " Go sur " + disque.getTotalBytes() / 1_073_741_824 + " Go\n"
+                + "Réseau : " + adresseIp() + "\n"
+                + "Température : " + temperature() + "\n"
+                + "Allumée depuis : " + (minutes >= 60 ? minutes / 60 + " h " : "") + minutes % 60 + " min";
+        menu = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Infos système")
+                .setMessage(texte)
+                .setPositiveButton("Fermer", null)
+                .create();
+        menu.show();
+    }
+
+    private static String adresseIp() {
+        try {
+            for (NetworkInterface i : java.util.Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (i.isLoopback() || !i.isUp()) continue;
+                for (InetAddress a : java.util.Collections.list(i.getInetAddresses())) {
+                    if (a instanceof Inet4Address) return a.getHostAddress() + " (" + (i.getName().startsWith("wlan") ? "Wi-Fi" : i.getName()) + ")";
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "non connecté";
+    }
+
+    private static String temperature() {
+        try {
+            String brut = new String(Files.readAllBytes(Paths.get("/sys/class/thermal/thermal_zone0/temp"))).trim();
+            return Math.round(Integer.parseInt(brut) / 1000.0) + " °C";
+        } catch (Exception e) {
+            return "indisponible";
         }
     }
 
@@ -545,6 +711,10 @@ public class MainActivity extends Activity {
     private void launch(TileView t) {
         if ("@reboot".equals(t.entry.key)) {
             confirmerRedemarrage(t.entry);
+            return;
+        }
+        if ("@infos".equals(t.entry.key)) {
+            afficherInfos();
             return;
         }
         if ("@veille".equals(t.entry.key)) {
@@ -734,7 +904,7 @@ public class MainActivity extends Activity {
     private void reloadApps() {
         View f = getCurrentFocus();
         boolean inDock = !(f instanceof TileView) || ((TileView) f).row < 0;
-        apps = Apps.load(this);
+        apps = Apps.load(this, infosAffichees);
         renderAll();
         if (inDock) {
             focusDock();
