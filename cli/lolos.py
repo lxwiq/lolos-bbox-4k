@@ -1605,6 +1605,14 @@ def cmd_accueil(args):
     info("Installation du lanceur Accueil (%s)…" % apk)
     r = adb.lancer(["install", "-r", str(apk)], 300)
     journaliser("adb install -r %s" % apk.name)
+    if "UPDATE_INCOMPATIBLE" in r.sortie + r.erreur or "signatures do not match" in r.sortie + r.erreur:
+        # Version déjà installée signée par une autre clé (compilation locale ou ancienne version) :
+        # on retire NOTRE lanceur seulement, puis on le réinstalle (les fonds sont renvoyés ensuite).
+        info("  Ancienne version signée différemment : réinstallation du lanceur…")
+        adb.lancer(["uninstall", paquet], 120)
+        journaliser("adb uninstall %s (signature différente)" % paquet)
+        r = adb.lancer(["install", "-r", str(apk)], 300)
+        journaliser("adb install -r %s" % apk.name)
     if "Success" not in r.sortie:
         raise Erreur("Installation de l'APK refusée : %s" % (r.sortie + r.erreur).strip())
     info("  ✅ APK installé")

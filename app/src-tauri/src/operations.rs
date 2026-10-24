@@ -240,7 +240,17 @@ pub fn installer_accueil(
     let apk = dossier_appli.join("Accueil.apk");
     std::fs::write(&apk, APK).map_err(|e| e.to_string())?;
     journal("Installation de l'écran d'accueil…".into());
-    adb::executer(tv.adb, &["-s", tv.serie, "install", "-r", &apk.to_string_lossy()])?;
+    let installer = || adb::executer(tv.adb, &["-s", tv.serie, "install", "-r", &apk.to_string_lossy()]);
+    if let Err(e) = installer() {
+        if !(e.contains("UPDATE_INCOMPATIBLE") || e.contains("signatures do not match")) {
+            return Err(e);
+        }
+        // Version déjà installée signée par une autre clé : on retire NOTRE lanceur seulement,
+        // puis on le réinstalle (les paysages sont renvoyés juste après).
+        journal("Ancienne version signée différemment : réinstallation de l'accueil…".into());
+        adb::executer(tv.adb, &["-s", tv.serie, "uninstall", &a.paquet])?;
+        installer()?;
+    }
     for op in &a.appops {
         // SYSTEM_ALERT_WINDOW : permet à la tuile TV de relancer le direct pendant que la Bbox démarre
         tv.sh(&format!("appops set {} {op} allow", a.paquet))?;

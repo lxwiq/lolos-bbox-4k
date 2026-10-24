@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAC: bool = cfg!(target_os = "macos");
 const EHOSTUNREACH_MAC: i32 = 65;
@@ -43,31 +43,38 @@ pub fn ip_locale() -> Option<Ipv4Addr> {
     }
 }
 
-/// L'appli a-t-elle le droit de joindre le réseau local ? macOS laisse toujours passer la box,
-/// on sonde donc une autre adresse : un refus de macOS tombe instantanément (« No route to
-/// host » sans même chercher l'appareil), alors qu'une adresse vide met du temps à échouer.
-/// Sur macOS, ce premier essai déclenche aussi la demande d'autorisation.
-pub fn acces_reseau_local() -> bool {
-    if !MAC {
-        return true;
+/// Premier contact avec le réseau local au démarrage : sur macOS, il fait apparaître la
+/// demande d'autorisation « Réseau local » avant que l'utilisateur n'arrive à la recherche.
+pub fn declencher_demande_acces() {
+    if let Some(locale) = ip_locale() {
+        let [a, b, c, d] = locale.octets();
+        let voisin = Ipv4Addr::new(a, b, c, if d == 2 { 3 } else { 2 });
+        let _ = TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(voisin), 9), Duration::from_millis(300));
     }
-    let Some(locale) = ip_locale() else { return true };
-    let [a, b, c, d] = locale.octets();
-    let sonde = if d == 2 { 3 } else { 2 };
-    let debut = std::time::Instant::now();
-    match TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(Ipv4Addr::new(a, b, c, sonde)), 9), Duration::from_millis(300)) {
-        Err(e) if e.raw_os_error() == Some(EHOSTUNREACH_MAC) => debut.elapsed() > Duration::from_millis(150),
-        _ => true,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum Sonde {
+    Ouvert,
+    Ferme,
+    /// « No route to host » immédiat : refus de macOS (ou adresse marquée injoignable)
+    RefusImmediat,
+}
+
+fn sonder_direct(ip: Ipv4Addr, port: u16) -> Sonde {
+    let debut = Instant::now();
+    match TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(ip), port), Duration::from_millis(500)) {
+        Ok(_) => Sonde::Ouvert,
+        Err(e) if MAC && e.raw_os_error() == Some(EHOSTUNREACH_MAC) && debut.elapsed() < Duration::from_millis(60) => {
+            Sonde::RefusImmediat
+        }
+        Err(_) => Sonde::Ferme,
     }
 }
 
 static ERREUR_NC_SIGNALEE: AtomicBool = AtomicBool::new(false);
 
-/// Le port répond-il ? `via_nc` : passer par /usr/bin/nc (appli bloquée par macOS).
-fn ouvert(ip: Ipv4Addr, port: u16, via_nc: bool) -> bool {
-    if !via_nc {
-        return TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(ip), port), Duration::from_millis(500)).is_ok();
-    }
+fn sonder_nc(ip: Ipv4Addr, port: u16) -> bool {
     match Command::new("/usr/bin/nc")
         .args(["-z", "-G", "1", &ip.to_string(), &port.to_string()])
         .stdout(Stdio::null())
@@ -84,17 +91,10 @@ fn ouvert(ip: Ipv4Addr, port: u16, via_nc: bool) -> bool {
     }
 }
 
-/// Sonde le /24 local : port 8009 (Cast), 6466 (télécommande Android TV) ou 5555 (ADB).
-pub fn chercher() -> Recherche {
-    let Some(locale) = ip_locale() else {
-        return Recherche { tvs: vec![], reseau: "introuvable".into(), acces_bloque: false };
-    };
-    let [a, b, c, _] = locale.octets();
-    let via_nc = !acces_reseau_local();
-    crate::adb::tracer(
-        "cmd",
-        format!("recherche sur {a}.{b}.{c}.0/24 (ports 8009, 6466, 5555{})", if via_nc { ", via /usr/bin/nc" } else { "" }),
-    );
+/// Un balayage du /24 : port 8009 (Cast), 6466 (télécommande Android TV) ou 5555 (ADB).
+/// Renvoie les TV trouvées et la part des sondes refusées instantanément.
+fn balayer(a: u8, b: u8, c: u8, locale: Ipv4Addr, via_nc: bool) -> (Vec<TvTrouvee>, f32) {
+    let passerelles = [Ipv4Addr::new(a, b, c, 1), Ipv4Addr::new(a, b, c, 254)];
     let (tx, rx) = mpsc::channel();
     let hotes: Vec<u8> = (1..=254).collect();
     // Avec nc, un processus par sonde : une appli lancée depuis le Finder n'a droit qu'à
@@ -108,37 +108,72 @@ pub fn chercher() -> Recherche {
                 if ip == locale {
                     continue;
                 }
-                let cast = ouvert(ip, 8009, via_nc);
-                let telecommande = !cast && ouvert(ip, 6466, via_nc);
-                let adb = ouvert(ip, 5555, via_nc);
-                if cast || telecommande || adb {
-                    let _ = tx.send(TvTrouvee { ip: ip.to_string(), adb, cast, telecommande });
-                }
+                let sonde = |port| {
+                    if via_nc {
+                        if sonder_nc(ip, port) { Sonde::Ouvert } else { Sonde::Ferme }
+                    } else {
+                        sonder_direct(ip, port)
+                    }
+                };
+                let s_cast = sonde(8009);
+                let refus = s_cast == Sonde::RefusImmediat && !passerelles.contains(&ip);
+                let cast = s_cast == Sonde::Ouvert;
+                let telecommande = !cast && !refus && sonde(6466) == Sonde::Ouvert;
+                let adb = !refus && sonde(5555) == Sonde::Ouvert;
+                let tv = (cast || telecommande || adb).then(|| TvTrouvee { ip: ip.to_string(), adb, cast, telecommande });
+                let _ = tx.send((tv, refus));
             }
         });
     }
     drop(tx);
-    let mut tvs: Vec<TvTrouvee> = rx.into_iter().collect();
+    let (mut tvs, mut refus, mut total) = (Vec::new(), 0u32, 0u32);
+    for (tv, r) in rx {
+        total += 1;
+        refus += r as u32;
+        tvs.extend(tv);
+    }
     tvs.sort_by_key(|t| t.ip.parse::<Ipv4Addr>().map(u32::from).unwrap_or(0));
+    (tvs, if total == 0 { 0.0 } else { refus as f32 / total as f32 })
+}
+
+/// Recherche des TV : en direct d'abord ; si macOS refuse tout (autorisation « Réseau local »
+/// absente ou périmée), nouvel essai via /usr/bin/nc.
+pub fn chercher() -> Recherche {
+    let Some(locale) = ip_locale() else {
+        return Recherche { tvs: vec![], reseau: "introuvable".into(), acces_bloque: false };
+    };
+    let [a, b, c, _] = locale.octets();
+    let reseau = format!("{a}.{b}.{c}.0/24");
+    crate::adb::tracer("cmd", format!("recherche sur {reseau} (ports 8009, 6466, 5555)"));
+    let (mut tvs, part_refus) = balayer(a, b, c, locale, false);
+    let bloque = tvs.is_empty() && part_refus > 0.95;
+    if bloque {
+        crate::adb::tracer("err", format!("{:.0} % des sondes refusées instantanément par macOS : nouvel essai via /usr/bin/nc", part_refus * 100.0));
+        tvs = balayer(a, b, c, locale, true).0;
+    }
     for t in &tvs {
         crate::adb::tracer("out", format!("{} : cast={} télécommande={} adb={}", t.ip, t.cast, t.telecommande, t.adb));
     }
     crate::adb::tracer("info", format!("{} TV trouvée(s)", tvs.len()));
-    let acces_bloque = via_nc && tvs.is_empty();
+    let acces_bloque = bloque && tvs.is_empty();
     if acces_bloque {
         crate::adb::tracer("err", "macOS refuse l'accès au réseau local à Lol'OS (autorisation « Réseau local »)");
     }
-    Recherche { tvs, reseau: format!("{a}.{b}.{c}.0/24"), acces_bloque }
+    Recherche { tvs, reseau, acces_bloque }
 }
 
 pub fn port_adb_ouvert(ip: &str) -> Result<bool, String> {
     let ip: Ipv4Addr = ip.parse().map_err(|_| format!("« {ip} » n'est pas une adresse IP"))?;
-    Ok(ouvert(ip, 5555, !acces_reseau_local()))
+    Ok(match sonder_direct(ip, 5555) {
+        Sonde::Ouvert => true,
+        Sonde::RefusImmediat => sonder_nc(ip, 5555),
+        Sonde::Ferme => false,
+    })
 }
 
 /// Diagnostic détaillé d'une adresse : connexion directe et via nc, avec les erreurs exactes.
 pub fn diagnostic(ip: &str) -> String {
-    let mut r = format!("ip locale : {:?}\naccès au réseau local : {}\n", ip_locale(), acces_reseau_local());
+    let mut r = format!("ip locale : {:?}\n", ip_locale());
     let Ok(adresse) = ip.parse::<Ipv4Addr>() else { return r + "adresse invalide\n" };
     for port in [8009u16, 5555] {
         let direct = match TcpStream::connect_timeout(&SocketAddr::new(IpAddr::V4(adresse), port), Duration::from_secs(2)) {
@@ -181,7 +216,7 @@ pub fn demarrer_relais(ip: &str) -> io::Result<Relais> {
     let port = ecoute.local_addr()?.port();
     let arret = Arc::new(AtomicBool::new(false));
 
-    if !acces_reseau_local() {
+    if sonder_direct(ip, 5555) == Sonde::RefusImmediat {
         drop(ecoute);
         let script = format!(
             "d=$(mktemp -d); f=$d/fifo; mkfifo $f; trap 'rm -rf $d' EXIT; \

@@ -294,10 +294,7 @@ pub fn run() {
             installer_traceur(app.handle().clone(), dossier.clone());
             // macOS : un premier essai vers la box fait apparaître tout de suite la demande
             // d'autorisation « Réseau local », avant que l'utilisateur n'arrive à la recherche.
-            std::thread::spawn(|| {
-                let ok = reseau::acces_reseau_local();
-                adb::tracer("info", format!("accès au réseau local : {}", if ok { "autorisé" } else { "refusé par macOS" }));
-            });
+            std::thread::spawn(reseau::declencher_demande_acces);
             adb::tracer("info", format!("Lol'OS {} démarré — données dans {}", env!("CARGO_PKG_VERSION"), dossier.display()));
             app.manage(Appli { session: Mutex::new(Session::default()), profil: profil::charger(), dossier });
             Ok(())
