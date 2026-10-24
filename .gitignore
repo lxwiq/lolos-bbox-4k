@@ -2,6 +2,7 @@
 android/build/
 android/Accueil.apk
 android/Accueil.version
+android/*.idsig
 *.keystore
 app/node_modules/
 app/src-tauri/target/
