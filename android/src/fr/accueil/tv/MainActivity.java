@@ -22,13 +22,14 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.graphics.BitmapFactory;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -58,13 +59,20 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Écran d'accueil minimal façon Apple TV : paysage animé en fond, dock d'applis favorites,
- * grille « Toutes les applis » sous le dock (flèche bas).
+ * Écran d'accueil minimal façon Apple TV : paysage animé en fond, dock d'applis favorites
+ * (panneau translucide en bas), grille « Toutes les applis » sous le dock (flèche bas).
  * Appui long sur OK (ou touche Menu) : déplacer / retirer / ajouter au dock.
+ *
+ * Toutes les dimensions sont en unités d'écran (1/960 de la largeur : 2 px en 1080p, 4 px en
+ * 4K), quelle que soit la densité annoncée par la box : la grille de 5 colonnes occupe toujours
+ * la même part de l'écran, avec des marges égales à gauche et à droite.
  */
 public class MainActivity extends Activity {
-    private static final int TILE_W = 160, TILE_H = 90, GAP = 26, SIDE = 40, LABEL_H = 34;
+    /** Colonnes de la grille ; le dock en a autant, alignées dessus. */
     private static final int COLUMNS = 5;
+    private static final int MARGE = 48, ECART = 24, LIBELLE = 30;
+    /** Dock : débord du panneau autour des tuiles, marge au-dessus des tuiles, marge sous le panneau. */
+    private static final int DOCK_BORD = 14, DOCK_HAUT = 14, DOCK_BAS = 20;
     private static final long IDLE_MS = 60_000;
     private static final long ROTATE_MS = 8 * 60_000;
     private static final String[] DEFAULT_DOCK = {
@@ -75,12 +83,15 @@ public class MainActivity extends Activity {
     private final List<TileView> dockTiles = new ArrayList<>();
 
     private SharedPreferences prefs;
+    /** Pixels par unité d'écran, et dimensions de la grille en pixels (voir mesurer()). */
+    private float unite;
+    private int tileW, tileH, gap, side, labelH;
     private Apps apps;
     private Wallpaper wallpaper;
     private VScroll scroll;
     private LinearLayout content, dockRow, grid;
     private TextView gridTitle, hint;
-    private View dim, scrim, topScrim, clock;
+    private View dim, topScrim, clock;
     private FrameLayout racine;
     private TextView salut, meteo;
     private View voileNuit;
@@ -143,6 +154,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("accueil", MODE_PRIVATE);
+        mesurer();
         loadDock();
         buildUi();
         perso = Personnalisation.charger(this);
@@ -206,7 +218,7 @@ public class MainActivity extends Activity {
         if (moving >= 0) endMove();
         if (menu != null) menu.dismiss();
         idle = false;
-        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) {
+        for (View v : new View[] { scroll, clock, salut, topScrim }) {
             v.animate().cancel();
             v.setAlpha(1f);
         }
@@ -226,6 +238,21 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- interface
 
+    /**
+     * Cale la grille sur la largeur réelle de l'écran : 5 tuiles 16:9 séparées par des écarts
+     * fixes, le reste en marges égales des deux côtés (≈ zone sûre des TV, 5 % de la largeur).
+     */
+    private void mesurer() {
+        DisplayMetrics m = getResources().getDisplayMetrics();
+        int largeur = Math.max(m.widthPixels, m.heightPixels);
+        unite = largeur / 960f;
+        gap = u(ECART);
+        tileW = (largeur - 2 * u(MARGE) - (COLUMNS - 1) * gap) / COLUMNS;
+        tileH = Math.round(tileW * 9 / 16f);
+        side = (largeur - COLUMNS * tileW - (COLUMNS - 1) * gap) / 2;
+        labelH = u(LIBELLE);
+    }
+
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
 
@@ -244,16 +271,11 @@ public class MainActivity extends Activity {
         voileNuit.setAlpha(0f);
         root.addView(voileNuit, match());
 
-        scrim = new View(this);
-        scrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] { 0x00000000, 0x00000000, 0x26000000, 0xA6000000 }));
-        root.addView(scrim, match());
-
         // Assombrit le haut de l'image pour que l'heure reste lisible sur un ciel clair
         topScrim = new View(this);
         topScrim.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] { 0x66000000, 0x00000000 }));
-        root.addView(topScrim, new FrameLayout.LayoutParams(-1, dp(150), Gravity.TOP));
+        root.addView(topScrim, new FrameLayout.LayoutParams(-1, u(150), Gravity.TOP));
 
         dim = new View(this);
         dim.setBackgroundColor(0xFF05080C);
@@ -271,29 +293,31 @@ public class MainActivity extends Activity {
         scroll.addView(content, new FrameLayout.LayoutParams(-1, -2));
         root.addView(scroll, match());
 
-        int screenH = getResources().getDisplayMetrics().heightPixels;
-        content.addView(new View(this),
-                new LinearLayout.LayoutParams(-1, screenH - dp(TILE_H + LABEL_H + 24 + 34)));
+        // Dock : panneau translucide posé en bas de l'écran ; ses emplacements sont ceux des
+        // colonnes de la grille, le panneau déborde un peu autour (nom de l'appli compris).
+        int screenH = Math.min(getResources().getDisplayMetrics().widthPixels,
+                getResources().getDisplayMetrics().heightPixels);
+        int bord = u(DOCK_BORD);
+        int dockH = u(DOCK_HAUT) + tileH + labelH;
+        content.addView(new View(this), new LinearLayout.LayoutParams(-1, screenH - dockH - u(DOCK_BAS)));
 
-        HorizontalScrollView dockScroll = new HorizontalScrollView(this);
-        dockScroll.setHorizontalScrollBarEnabled(false);
-        dockScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        dockScroll.setClipChildren(false);
-        dockScroll.setClipToPadding(false);
-        dockScroll.setPadding(dp(SIDE), dp(12), dp(SIDE), dp(12));
         dockRow = new LinearLayout(this);
         dockRow.setOrientation(LinearLayout.HORIZONTAL);
         dockRow.setClipChildren(false);
-        dockScroll.addView(dockRow, new FrameLayout.LayoutParams(-2, -2));
-        content.addView(dockScroll, new LinearLayout.LayoutParams(-1, -2));
+        dockRow.setClipToPadding(false);
+        dockRow.setPadding(bord, u(DOCK_HAUT), bord, 0);
+        dockRow.setBackground(fondDock());
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(-1, dockH);
+        dl.setMargins(side - bord, 0, side - bord, u(DOCK_BAS));
+        content.addView(dockRow, dl);
 
         gridTitle = new TextView(this);
         gridTitle.setText("Toutes les applis");
-        gridTitle.setTextSize(19);
+        gridTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, u(19));
         gridTitle.setTextColor(0xD9FFFFFF);
         gridTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(-2, -2);
-        tl.setMargins(dp(SIDE), dp(56), 0, dp(14));
+        tl.setMargins(side, u(40), 0, u(14));
         content.addView(gridTitle, tl);
 
         grid = new LinearLayout(this);
@@ -320,7 +344,7 @@ public class MainActivity extends Activity {
         meteo.setVisibility(View.GONE);
         clockBox.addView(meteo);
         FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
-        cl.setMargins(0, dp(26), dp(SIDE), 0);
+        cl.setMargins(0, u(26), side, 0);
         root.addView(clockBox, cl);
         clock = clockBox;
 
@@ -329,7 +353,7 @@ public class MainActivity extends Activity {
         styleOverlayText(salut, 30, "sans-serif-light", 0xF2FFFFFF);
         salut.setVisibility(View.GONE);
         FrameLayout.LayoutParams sl = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
-        sl.setMargins(dp(SIDE), dp(26), 0, 0);
+        sl.setMargins(side, u(26), 0, 0);
         root.addView(salut, sl);
         racine = root;
 
@@ -337,14 +361,14 @@ public class MainActivity extends Activity {
         hint.setText("←  →  déplacer        OK  terminer");
         styleOverlayText(hint, 15, "sans-serif-medium", 0xFFFFFFFF);
         GradientDrawable pill = new GradientDrawable();
-        pill.setCornerRadius(dp(20));
+        pill.setCornerRadius(u(20));
         pill.setColor(0x99000000);
         hint.setBackground(pill);
-        hint.setPadding(dp(20), dp(8), dp(20), dp(8));
+        hint.setPadding(u(20), u(8), u(20), u(8));
         hint.setVisibility(View.GONE);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-2, -2,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        hl.topMargin = dp(34);
+        hl.topMargin = u(34);
         root.addView(hint, hl);
 
         scroll.setOnScrollChangeListener((v, x, y, oldX, oldY) -> applyScrollFx(y));
@@ -359,14 +383,24 @@ public class MainActivity extends Activity {
         rebuilding = false;
     }
 
+    /** Fond du dock : verre sombre à plat, coins arrondis, liseré clair. */
+    private GradientDrawable fondDock() {
+        GradientDrawable fond = new GradientDrawable();
+        fond.setColor(0x8C0C0C10);
+        fond.setCornerRadius(u(16));
+        fond.setStroke(Math.max(1, u(0.5f)), 0x24FFFFFF);
+        return fond;
+    }
+
     private void renderDock() {
         dockRow.removeAllViews();
         dockTiles.clear();
         for (String key : dock) {
+            if (dockTiles.size() == COLUMNS) break;  // le dock tient sur une rangée de la grille
             Apps.Entry e = apps.byKey.get(key);
             if (e == null) continue;  // appli désactivée : sa place est gardée
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(TILE_W), -2);
-            lp.rightMargin = dp(GAP);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, -2);
+            if (!dockTiles.isEmpty()) lp.leftMargin = gap;
             dockRow.addView(makeItem(e, -1, dockTiles.size()), lp);
         }
     }
@@ -379,11 +413,11 @@ public class MainActivity extends Activity {
                 rowView = new LinearLayout(this);
                 rowView.setOrientation(LinearLayout.HORIZONTAL);
                 rowView.setClipChildren(false);
-                rowView.setPadding(dp(SIDE), 0, 0, dp(6));
+                rowView.setPadding(side, 0, 0, u(6));
                 grid.addView(rowView, new LinearLayout.LayoutParams(-1, -2));
             }
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(TILE_W), -2);
-            lp.rightMargin = dp(GAP);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, -2);
+            lp.rightMargin = gap;
             rowView.addView(makeItem(apps.all.get(i), i / COLUMNS, i), lp);
         }
     }
@@ -399,23 +433,24 @@ public class MainActivity extends Activity {
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
 
-        TileView tile = new TileView(this, entry, label, row, index);
+        TileView tile = new TileView(this, entry, label, row, index, unite);
         tile.setOnClickListener(v -> launch(tile));
         tile.setOnLongClickListener(v -> {
             showMenu(tile);
             return true;
         });
-        item.addView(tile, new LinearLayout.LayoutParams(dp(TILE_W), dp(TILE_H)));
-        item.addView(label, new LinearLayout.LayoutParams(-1, dp(LABEL_H)));
+        item.addView(tile, new LinearLayout.LayoutParams(tileW, tileH));
+        item.addView(label, new LinearLayout.LayoutParams(-1, labelH));
         if (row < 0) dockTiles.add(tile);
         return item;
     }
 
-    private void styleOverlayText(TextView t, float sp, String family, int color) {
-        t.setTextSize(sp);
+    /** Texte sur le paysage ; taille en unités d'écran (proportionnelle à la largeur). */
+    private void styleOverlayText(TextView t, float taille, String family, int color) {
+        t.setTextSize(TypedValue.COMPLEX_UNIT_PX, taille * unite);
         t.setTextColor(color);
         t.setTypeface(Typeface.create(family, Typeface.NORMAL));
-        t.setShadowLayer(10, 0, 2, 0x99000000);
+        t.setShadowLayer(5 * unite, 0, unite, 0x99000000);
     }
 
     // ---------------------------------------------------------------- personnalisation
@@ -567,7 +602,7 @@ public class MainActivity extends Activity {
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
         if (perso.logo != null) logo.setImageBitmap(BitmapFactory.decodeFile(perso.logo.getPath()));
         if (logo.getDrawable() == null) logo.setImageResource(R.drawable.marque);
-        ecran.addView(logo, new LinearLayout.LayoutParams(dp(180), dp(180)));
+        ecran.addView(logo, new LinearLayout.LayoutParams(u(180), u(180)));
 
         String texte = Personnalisation.avecMoment(perso.messageDemarrage);
         if (!texte.isEmpty()) {
@@ -576,7 +611,7 @@ public class MainActivity extends Activity {
             message.setGravity(Gravity.CENTER);
             message.setText(texte);
             LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(-2, -2);
-            ml.topMargin = dp(24);
+            ml.topMargin = u(24);
             ecran.addView(message, ml);
         }
         racine.addView(ecran, match());
@@ -602,11 +637,11 @@ public class MainActivity extends Activity {
     }
 
     private int gridTop() {
-        return gridTitle.getTop() - dp(40);
+        return gridTitle.getTop() - u(40);
     }
 
     private int gridScrollFor(int row) {
-        int rowH = grid.getChildCount() > 0 ? grid.getChildAt(0).getHeight() : dp(TILE_H + LABEL_H);
+        int rowH = grid.getChildCount() > 0 ? grid.getChildAt(0).getHeight() : tileH + labelH;
         int y = gridTop() + Math.max(0, row - 1) * rowH;
         return Math.min(y, Math.max(0, content.getHeight() - scroll.getHeight()));
     }
@@ -698,12 +733,12 @@ public class MainActivity extends Activity {
             return;
         }
         idle = true;
-        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) v.animate().alpha(0f).setDuration(1500).start();
+        for (View v : new View[] { scroll, clock, salut, topScrim }) v.animate().alpha(0f).setDuration(1500).start();
     }
 
     private void wake() {
         idle = false;
-        for (View v : new View[] { scroll, clock, salut, scrim, topScrim }) v.animate().alpha(1f).setDuration(250).start();
+        for (View v : new View[] { scroll, clock, salut, topScrim }) v.animate().alpha(1f).setDuration(250).start();
     }
 
     // ---------------------------------------------------------------- actions
@@ -828,6 +863,11 @@ public class MainActivity extends Activity {
 
     private void addToDock(String key) {
         List<String> keys = visibleDock();
+        if (keys.size() >= COLUMNS) {
+            Toast.makeText(this, "Le dock est plein (" + COLUMNS + " applis) : retirez-en une d'abord",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         keys.add(key);
         setDock(keys);
         lastDockIndex = keys.size() - 1;
@@ -916,8 +956,9 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- utilitaires
 
-    private int dp(float v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+    /** Unités d'écran → pixels (1 unité = 1/960 de la largeur de l'écran). */
+    private int u(float v) {
+        return Math.round(v * unite);
     }
 
     private static FrameLayout.LayoutParams match() {

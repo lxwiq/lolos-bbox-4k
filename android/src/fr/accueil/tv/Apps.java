@@ -40,18 +40,18 @@ final class Apps {
         final Intent intent;
         final String packageName;  // null pour une tuile spéciale
         final Drawable banner;     // bannière TV 16:9 fournie par l'appli
-        final Drawable icon;       // sinon, icône sur fond coloré
-        final int[] colors;
+        final Drawable icon;       // sinon, icône sur fond coloré (à plat)
+        final int color;
 
         Entry(String key, String label, Intent intent, String packageName,
-              Drawable banner, Drawable icon, int[] colors) {
+              Drawable banner, Drawable icon, int color) {
             this.key = key;
             this.label = label;
             this.intent = intent;
             this.packageName = packageName;
             this.banner = banner;
             this.icon = icon;
-            this.colors = colors;
+            this.color = color;
         }
 
         boolean isSpecial() {
@@ -77,28 +77,28 @@ final class Apps {
                 .setClassName(BBUI, BBUI + ".ui.live.LiveActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (pm.resolveActivity(live, 0) != null) {
-            apps.add(special("@tv", "TV", live, 0xFF2457E0, 0xFF0B1E5B));
-            apps.add(special("@guide", "Programme TV", bbox("epg"), 0xFF7A3FD1, 0xFF2C1060));
+            apps.add(special("@tv", "TV", live, 0xFF2457E0));
+            apps.add(special("@guide", "Programme TV", bbox("epg"), 0xFF6D3FC4));
             apps.add(special("@records", "Enregistrements",
                     new Intent(Intent.ACTION_MAIN)
                             .setClassName(BBUI, BBUI + ".ui.pvr.PvrActivity")
                             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP),
-                    0xFFD8432F, 0xFF5A120A));
+                    0xFFC93A28));
         }
         // Alimentation : messages acceptés par le service système de la Bbox (traités dans MainActivity)
         Intent power = new Intent().setClassName(POWER, POWER + ".PowerReceiver");
         if (!pm.queryBroadcastReceivers(power, 0).isEmpty()) {
             apps.add(special("@reboot", "Redémarrer", new Intent(power).setAction(POWER + ".REBOOT_QUIESCENT"),
-                    0xFF3F3F46, 0xFF18181B));
+                    0xFF3F3F46));
             apps.add(special("@veille", "Mettre en veille", new Intent(power).setAction(POWER + ".GO_TO_SLEEP"),
-                    0xFF27272A, 0xFF09090B));
+                    0xFF27272A));
         }
         if (infosSysteme) {
-            apps.add(special("@infos", "Infos système", new Intent(), 0xFF0F766E, 0xFF042F2E));
+            apps.add(special("@infos", "Infos système", new Intent(), 0xFF0F766E));
         }
         apps.add(special("@settings", "Réglages",
                 new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                0xFF5E6670, 0xFF24282E));
+                0xFF52525B));
 
         // Une entrée par paquet, en préférant l'activité TV (leanback)
         Map<String, ResolveInfo> found = new LinkedHashMap<>();
@@ -126,7 +126,7 @@ final class Apps {
             Drawable banner = ai.loadBanner(pm);
             Drawable icon = banner == null ? ai.loadIcon(pm) : null;
             regular.add(new Entry(pkg, label, launch, pkg, banner, icon,
-                    icon == null ? null : tint(icon)));
+                    icon == null ? 0 : tint(icon)));
         }
         Collator collator = Collator.getInstance(Locale.FRANCE);
         regular.sort((a, b) -> collator.compare(a.label, b.label));
@@ -140,12 +140,12 @@ final class Apps {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     }
 
-    private static Entry special(String key, String label, Intent intent, int from, int to) {
-        return new Entry(key, label, intent, null, null, null, new int[] { from, to });
+    private static Entry special(String key, String label, Intent intent, int color) {
+        return new Entry(key, label, intent, null, null, null, color);
     }
 
     /** Couleur moyenne de l'icône, assombrie, pour le fond de la tuile. */
-    private static int[] tint(Drawable icon) {
+    private static int tint(Drawable icon) {
         Bitmap bitmap = Bitmap.createBitmap(12, 12, Bitmap.Config.ARGB_8888);
         Rect old = icon.copyBounds();
         icon.setBounds(0, 0, 12, 12);
@@ -165,7 +165,7 @@ final class Apps {
         }
         bitmap.recycle();
         int base = n == 0 ? 0xFF3A3F47 : Color.rgb((int) (r / n), (int) (g / n), (int) (b / n));
-        return new int[] { shade(base, 0.8f), shade(base, 0.4f) };
+        return shade(base, 0.6f);
     }
 
     private static int shade(int c, float f) {
