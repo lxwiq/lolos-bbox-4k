@@ -9,7 +9,7 @@ Aucune n'est sous licence CC BY-SA : il n'y a donc pas d'obligation de partage
 Modifications communes à tous les fichiers :
   recadré, raccourci, boucle fondue
   (recadrage/mise à l'échelle en 1920x1080 16:9 sans bandes noires,
-   extrait de 30 à 34 s, fondu enchaîné d'environ 1,5 s entre la fin et le début
+   extrait de 30 à 34 s (63-64 s une fois ralenti), fondu enchaîné d'environ 1,5 s entre la fin et le début
    pour une lecture en boucle sans saut, piste audio supprimée,
    ré-encodage H.264 High@4.0 yuv420p)
 
@@ -19,8 +19,10 @@ Modifications communes à tous les fichiers :
   Auteur      : PantheraLeo1359531
   Licence     : CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
   Page Commons: https://commons.wikimedia.org/wiki/File:Zeitraffer_im_Wald_bei_Hof_20241116.webm
-  Modifications : recadré, raccourci, boucle fondue
-                  (source 4752x3168 réduite et recadrée en 16:9, 31,5 s)
+  Modifications : recadré, raccourci, boucle fondue, ralenti
+                  (source 4752x3168 réduite et recadrée en 16:9, 31,5 s ;
+                   accéléré d'origine ralenti 2× en calculant les images
+                   intermédiaires par interpolation de mouvement, 63 s)
 
 02-cascade.mp4
   Titre       : Dark Hollow upper falls Shenandoah NP VA 2024-10-11 08-33-31 1
@@ -43,8 +45,10 @@ Modifications communes à tous les fichiers :
   Auteur      : FreeSwissVideo (https://www.youtube.com/user/FreeSwissVideo)
   Licence     : CC BY 3.0 — https://creativecommons.org/licenses/by/3.0/
   Page Commons: https://commons.wikimedia.org/wiki/File:Wolken_Zeitraffer_-_Clouds_Timelapse_4K_HD_24FPS.webm
-  Modifications : recadré, raccourci, boucle fondue
-                  (24 -> 25 i/s, soit une accélération de 4 %, 32 s)
+  Modifications : recadré, raccourci, boucle fondue, ralenti
+                  (24 -> 25 i/s, soit une accélération de 4 %, 32 s ;
+                   accéléré d'origine ralenti 2× en calculant les images
+                   intermédiaires par interpolation de mouvement, 64 s)
 
 05-riviere.mp4
   Titre       : Little Applegate River (50857222626)

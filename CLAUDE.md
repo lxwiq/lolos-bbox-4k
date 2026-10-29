@@ -38,6 +38,16 @@ ADB et installe un écran d'accueil minimaliste. Tout ce qui est affiché à l'u
    utiliser `MonitorUpdateService` (OTA), `DreamApplyService` (extinction) ni `FactoryResetActivity`.
 9. Logo de démarrage Android et message « Bonjour… » de la Bbox : non modifiables sans root (partition système,
    contenu éditorial serveur). L'écran de démarrage Lol'OS (`personnalisation.json` + `logo-demarrage.png`) les remplace.
+10. Les applis absentes du profil sont trouvées sur la TV (`cmd package query-activities` LEANBACK_LAUNCHER et
+   LAUNCHER + `pm list packages -3`) et rangées dans `decouverte.categorie`, actives par défaut. adb ne donne que
+   l'identifiant de ressource du nom (`labelRes=0x7f…`) : le vrai nom est lu dans `resources.arsc`, extrait sur la
+   TV (`exec-out unzip -p <apk> resources.arsc`), par `arsc.rs` / `libelle_arsc` (mêmes règles des deux côtés).
+11. `remplacements` du profil (SmartTube `org.smarttube.stable` pour YouTube) : dernière version GitHub, APK choisi
+   selon `ro.product.cpu.abi` (`armeabi-v7a` sur la Bbox, `universal` sinon), installé AVANT de désactiver l'appli
+   remplacée (si l'installation échoue, rien n'est désactivé). YouTube n'est plus protégé.
+12. Les favoris de l'accueil Bbox sont dans ses données privées (illisibles sans root). Le ♥ vient de
+   `dumpsys usagestats` (≥ 60 s d'utilisation, applis de la liste d'applis seulement) : une appli ♥ n'est jamais
+   désactivée d'office (sauf télémétrie et pubs, `demander: false`).
 
 ## Règles
 

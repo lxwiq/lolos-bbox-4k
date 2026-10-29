@@ -214,6 +214,9 @@ ol.pas b { color: var(--texte); font-weight: 600; }
 .paquet span { display: block; font-weight: 500; }
 .paquet small { display: block; color: var(--texte-discret); font-size: 12px; font-weight: 400; }
 .paquet.deja small::after { content: " · déjà désactivé"; color: var(--succes); }
+.coeur { font-style: normal; color: var(--danger); }
+.remplacement { border-left: 3px solid var(--succes); }
+.remplacement .choix { margin: 0; }
 
 /* --- accueil : aperçu à plat --- */
 .apercu { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: center; margin-bottom: 18px; }

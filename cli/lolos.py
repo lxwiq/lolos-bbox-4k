@@ -30,6 +30,7 @@ import shlex
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import tempfile
 import threading
@@ -42,8 +43,11 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.2.0"
 DEPOT = "lxwiq/lolos-bbox-4k"  # dépôt GitHub (slug « propriétaire/projet ») pour les téléchargements
+# Révision de fonds.zip : à augmenter quand les vidéos changent (caches plus anciens retéléchargés).
+# 2 : forêt et nuages ralentis (1.2.0). Même valeur que VERSION_FONDS de l'installateur.
+VERSION_FONDS = "2"
 
 URL_RELEASE = "https://github.com/%s/releases/latest/download/" % DEPOT
 URL_PROFIL = "https://raw.githubusercontent.com/%s/main/profil/bbox-4k.json" % DEPOT
@@ -443,6 +447,51 @@ class Adb:
             raise Erreur("La TV n'a renvoyé aucune liste d'applis (pm list packages).")
         return tous, ensemble(r["desactives"]), ensemble(r["tiers"])
 
+    def octets(self, commande, timeout=120):
+        """Sortie binaire d'une commande sur la TV (exec-out : octets bruts). b"" en cas d'échec."""
+        try:
+            r = subprocess.run([self.chemin, "-s", self.serie, "exec-out", commande], stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=timeout)
+        except (subprocess.TimeoutExpired, OSError):
+            return b""
+        return r.stdout if r.returncode == 0 else b""
+
+    def lanceables(self):
+        """Applis de la liste d'applis de la TV : {paquet: (nom, identifiant de ressource du nom ou None ; APK)}.
+        Les applis désactivées n'y figurent pas."""
+        r = self.plusieurs([(c, "cmd package query-activities -a android.intent.action.MAIN "
+                                "-c android.intent.category." + c) for c in ("LEANBACK_LAUNCHER", "LAUNCHER")])
+        resultat = {}
+        for bloc in (r["LEANBACK_LAUNCHER"] + "\n" + r["LAUNCHER"]).split("Activity #")[1:]:
+            activite, _, appli = bloc.partition("ApplicationInfo:")
+            pid = re.search(r"packageName=(\S+)", activite)
+            if pid and pid.group(1) not in resultat:
+                apk = re.search(r"sourceDir=(\S+)", appli)
+                # Le nom de l'activité est celui affiché dans la liste d'applis, sinon celui de l'appli.
+                resultat[pid.group(1)] = (libelle_brut(activite) or libelle_brut(appli), apk.group(1) if apk else None)
+        return resultat
+
+    def utilisation(self):
+        """Temps passé dans chaque appli d'après les statistiques d'Android (plus longue période gardée) :
+        {paquet: {"secondes", "derniere" (AAAA-MM-JJ hh:mm:ss), "lancements"}}."""
+        resultat = {}
+        for ligne in self.shell("dumpsys usagestats").sortie.splitlines():
+            # package=org.exemple totalTimeUsed="6:59:48" lastTimeUsed="2026-10-27 22:21:26" … appLaunchCount=10
+            ligne = ligne.strip()
+            total = re.search(r'totalTimeUsed="([\d:]+)"', ligne)
+            if not ligne.startswith("package=") or not total:
+                continue
+            secondes = 0
+            for n in total.group(1).split(":"):
+                secondes = secondes * 60 + int(n)
+            derniere = re.search(r'lastTimeUsed="([^"]*)"', ligne)
+            lancements = re.search(r"appLaunchCount=(\d+)", ligne)
+            u = resultat.setdefault(ligne.split()[0][8:], {"secondes": 0, "derniere": "", "lancements": 0})
+            u["secondes"] = max(u["secondes"], secondes)
+            u["derniere"] = max(u["derniere"], derniere.group(1) if derniere else "")
+            u["lancements"] = max(u["lancements"], int(lancements.group(1)) if lancements else 0)
+        return {pid: u for pid, u in resultat.items() if u["secondes"] > 0}
+
     def accueil_actuel(self):
         lignes = self.texte("cmd package resolve-activity --brief -a android.intent.action.MAIN "
                             "-c android.intent.category.HOME").splitlines()
@@ -690,6 +739,8 @@ class Profil:
         self.reglages_sauvegardes = donnees.get("reglages_sauvegardes", [])
         self.accueil = donnees.get("accueil", {})
         self.avertissements = donnees.get("avertissements", [])
+        self.categorie_decouverte = donnees.get("decouverte", {}).get("categorie", "autres")
+        self.remplacements = donnees.get("remplacements", [])
         self.modeles = donnees.get("detection", {}).get("modeles") or MODELES_BBOX_SECOURS
         self.parent = {}
         for p in self.paquets:
@@ -1192,6 +1243,157 @@ def cmd_etat(args):
     return 0
 
 
+# ---- applis de la TV hors profil, vrais noms, utilisation ----
+
+FICHIER_NOMS = CACHE / "noms-applis.json"
+FAVORI_SECONDES = 60  # au-delà, l'appli est marquée ♥ et n'est jamais désactivée d'office
+
+
+def libelle_brut(texte):
+    """« labelRes=0x7f080000 nonLocalizedLabel=null icon=… » → nom en clair, identifiant de ressource, ou None."""
+    m = re.search(r"labelRes=0x([0-9a-fA-F]+) nonLocalizedLabel=(.*?) icon=", texte)
+    if not m:
+        return None
+    if m.group(2) not in ("null", ""):
+        return m.group(2)
+    return int(m.group(1), 16) or None
+
+
+def libelle_arsc(d, ref, profondeur=0):
+    """Texte de la ressource chaîne ref (0xPPTTEEEE) lu dans un resources.arsc : en français si l'APK le
+    contient, sinon la version par défaut. Même logique que app/src-tauri/src/arsc.rs."""
+    def u16(o):
+        return struct.unpack_from("<H", d, o)[0]
+
+    def u32(o):
+        return struct.unpack_from("<I", d, o)[0]
+
+    try:
+        if len(d) < 12 or u16(0) != 0x0002 or profondeur > 3:
+            return None
+        pid, tid, eid = ref >> 24, (ref >> 16) & 0xFF, ref & 0xFFFF
+        pool, valeurs = None, []  # valeurs : (langue de la configuration, type de valeur, valeur)
+        pos, fin = u16(2), min(len(d), u32(4))
+        while pos + 8 <= fin:
+            genre, entete, taille = u16(pos), u16(pos + 2), u32(pos + 4)
+            if taille < 8 or pos + taille > fin:
+                break
+            if genre == 0x0001 and pool is None:
+                pool = pos
+            elif genre == 0x0200 and u32(pos + 8) == pid:
+                sous = pos + entete
+                while sous + 8 <= pos + taille:
+                    g, h, t = u16(sous), u16(sous + 2), u32(sous + 4)
+                    if t < 8:
+                        break
+                    if g == 0x0201 and d[sous + 8] == tid:
+                        drapeaux, nombre, debut = d[sous + 9], u32(sous + 12), u32(sous + 16)
+                        decalage = None
+                        if drapeaux & 0x01:  # creux : paires (index, décalage / 4)
+                            for i in range(nombre):
+                                if u16(sous + h + 4 * i) == eid:
+                                    decalage = u16(sous + h + 4 * i + 2) * 4
+                                    break
+                        elif eid < nombre:
+                            if drapeaux & 0x02:
+                                o = u16(sous + h + 2 * eid)
+                                decalage = None if o == 0xFFFF else o * 4
+                            else:
+                                o = u32(sous + h + 4 * eid)
+                                decalage = None if o == 0xFFFFFFFF else o
+                        if decalage is not None:
+                            e = sous + debut + decalage
+                            drapeaux_entree, valeur = u16(e + 2), None
+                            if drapeaux_entree & 0x08:  # entrée compacte
+                                valeur = (drapeaux_entree >> 8, u32(e + 4))
+                            elif not drapeaux_entree & 0x01:  # pas une entrée complexe
+                                v = e + u16(e)
+                                valeur = (d[v + 3], u32(v + 4))
+                            if valeur and valeur[0] in (0x01, 0x03):
+                                valeurs.append((bytes(d[sous + 28:sous + 30]),) + valeur)
+                    sous += t
+            pos += taille
+        if not valeurs:
+            return None
+        rang = {b"fr": 0, b"\0\0": 1, b"en": 2}
+        _, genre, valeur = min(valeurs, key=lambda v: rang.get(v[0], 3))
+        if genre == 0x01:  # référence vers une autre ressource
+            return libelle_arsc(d, valeur, profondeur + 1)
+        if pool is None or valeur >= u32(pool + 8):
+            return None
+        o = pool + u32(pool + 20) + u32(pool + u16(pool + 2) + 4 * valeur)
+        if u32(pool + 16) & 0x100:  # UTF-8 : longueur UTF-16 (ignorée) puis longueur en octets
+            o += 2 if d[o] & 0x80 else 1
+            n = d[o]
+            o += 1
+            if n & 0x80:
+                n = ((n & 0x7F) << 8) | d[o]
+                o += 1
+            return d[o:o + n].decode("utf-8", "replace")
+        n = u16(o)
+        o += 2
+        if n & 0x8000:
+            n = ((n & 0x7FFF) << 16) | u16(o)
+            o += 2
+        return d[o:o + 2 * n].decode("utf-16-le", "replace")
+    except (struct.error, IndexError):
+        return None
+
+
+def nom_appli(adb, pid, lanceable, cache):
+    """Vrai nom de l'appli, lu dans le resources.arsc de son APK (extrait sur la TV) ; cache : {APK#ressource: nom}."""
+    libelle, apk = lanceable or (None, None)
+    if isinstance(libelle, str):
+        return libelle
+    if not libelle or not apk:
+        return pid
+    cle = "%s#%x" % (apk, libelle)  # le chemin de l'APK change à chaque mise à jour de l'appli
+    if not cache.get(cle):  # un échec (relais lent, lecture vide) n'est pas mémorisé : on réessaiera
+        cache[cle] = libelle_arsc(adb.octets("unzip -p %s resources.arsc" % shlex.quote(apk)), libelle)
+    return (cache[cle] or "").strip() or pid
+
+
+def inventaire(adb, profil, tiers):
+    """Applis de la TV absentes du profil (liste d'applis de la TV + applis installées en plus, hors paquets
+    protégés, Lol'OS et accueil actuel) avec leur vrai nom, et temps d'utilisation de toutes les applis.
+    Renvoie ({paquet: {id, nom, categorie, systeme}}, {paquet: utilisation})."""
+    lanceables = adb.lanceables()
+    exclus = set(profil.par_id) | profil.proteges | {profil.accueil.get("paquet"), adb.accueil_actuel().split("/")[0]}
+    try:
+        anciens = json.loads(FICHIER_NOMS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        anciens = {}
+    noms, trouvees = {}, {}
+    for pid in sorted((set(lanceables) | set(tiers)) - exclus):
+        libelle, apk = lanceables.get(pid) or (None, None)
+        cle = "%s#%x" % (apk, libelle) if isinstance(libelle, int) and apk else None
+        if anciens.get(cle):
+            noms[cle] = anciens[cle]
+        trouvees[pid] = {"id": pid, "nom": nom_appli(adb, pid, lanceables.get(pid), noms),
+                         "categorie": profil.categorie_decouverte, "systeme": pid not in tiers}
+    if noms != anciens:
+        try:
+            FICHIER_NOMS.parent.mkdir(parents=True, exist_ok=True)
+            FICHIER_NOMS.write_text(json.dumps(noms, ensure_ascii=False, indent=1), encoding="utf-8")
+        except OSError:
+            pass
+    # Seules les applis qu'on ouvre depuis la liste d'applis comptent (pas l'écran de veille, par exemple).
+    return trouvees, {pid: u for pid, u in adb.utilisation().items() if pid in lanceables}
+
+
+def est_favori(usage, pid):
+    return usage.get(pid, {}).get("secondes", 0) >= FAVORI_SECONDES
+
+
+def texte_utilisation(u):
+    """« utilisée 7 h 05, la dernière fois le 27/10/2026 »"""
+    h, m = u["secondes"] // 3600, int(round(u["secondes"] % 3600 / 60.0))
+    duree = ("%d h%s" % (h, " %02d" % m if m else "")) if h else "%d min" % max(m, 1)
+    date = u.get("derniere", "")[:10].split("-")
+    quand = ", la dernière fois le %s/%s/%s" % (date[2], date[1], date[0]) if len(date) == 3 and date[0] != "1970" else ""
+    return "utilisée %s%s" % (duree, quand)
+
+
 # ---- lister ----
 
 LIBELLES_ETAT = {"active": "active", "desactivee": "désactivée", "absente": "absente"}
@@ -1214,7 +1416,8 @@ def tableau(entetes, lignes):
 def cmd_lister(args):
     profil = charger_profil(getattr(args, "profil", None))
     adb = appareil(args)
-    tous, desactives, _ = adb.paquets()
+    tous, desactives, tiers = adb.paquets()
+    trouvees, usage = inventaire(adb, profil, tiers)
     paquets = []
     for p in profil.ordonnes():
         etat = etat_paquet(p["id"], tous, desactives)
@@ -1225,30 +1428,52 @@ def cmd_lister(args):
             "id": p["id"], "nom": p["nom"], "categorie": p["categorie"], "categorie_titre": cat.get("titre"),
             "demander": bool(cat.get("demander")), "etat": etat, "defaut": p.get("defaut"),
             "cache": bool(p.get("cache")), "lie_a": profil.parent.get(p["id"]), "lies": p.get("lies", []),
-            "priorite": p.get("priorite"), "note": p.get("note"),
+            "priorite": p.get("priorite"), "note": p.get("note"), "trouvee": False,
+            "favori": est_favori(usage, p["id"]), "utilisation": usage.get(p["id"]),
         })
-    hors_profil = sorted(desactives - set(profil.par_id))
+    for t in sorted(trouvees.values(), key=lambda t: t["nom"].lower()):
+        cat = profil.cat.get(t["categorie"], {})
+        paquets.append({
+            "id": t["id"], "nom": t["nom"], "categorie": t["categorie"], "categorie_titre": cat.get("titre"),
+            "demander": bool(cat.get("demander")), "etat": etat_paquet(t["id"], tous, desactives), "defaut": "garder",
+            "cache": False, "lie_a": None, "lies": [], "priorite": None, "note": None, "trouvee": True,
+            "systeme": t["systeme"], "favori": est_favori(usage, t["id"]), "utilisation": usage.get(t["id"]),
+        })
+    # Les applis trouvées rejoignent leur catégorie (tri stable : l'ordre du profil est gardé).
+    rang = {c["id"]: i for i, c in enumerate(profil.categories)}
+    paquets.sort(key=lambda p: rang.get(p["categorie"], 99))
+    hors_profil = sorted(desactives - set(profil.par_id) - set(trouvees))
     if SORTIE_JSON:
         afficher_json({"paquets": paquets, "hors_profil_desactives": hors_profil,
-                       "categories": profil.categories, "proteges": sorted(profil.proteges)})
+                       "categories": profil.categories, "proteges": sorted(profil.proteges),
+                       "remplacements": [dict(r, installe=r["paquet"] in tous) for r in profil.remplacements
+                                         if r["remplace"] in tous]})
         return 0
     lignes = []
     for p in paquets:
         nom = ("  ↳ " + p["nom"]) if p["lie_a"] else p["nom"]
+        if p["favori"]:
+            nom += " ♥"
         lignes.append([nom, p["categorie_titre"] or p["categorie"], LIBELLES_ETAT[p["etat"]],
                        {"desactiver": "désactiver", "garder": "garder"}.get(p["defaut"], p["defaut"]), p["id"]])
     tableau(["Appli", "Catégorie", "État", "Par défaut", "Paquet"], lignes)
     n_des = sum(1 for p in paquets if p["etat"] == "desactivee")
-    info("\n%d applis du profil sur cette TV, dont %d désactivées." % (len(paquets), n_des))
+    info("\n%d applis sur cette TV, dont %d désactivées et %d trouvées hors profil (catégorie « %s »)."
+         % (len(paquets), n_des, len(trouvees), profil.titre_categorie(profil.categorie_decouverte)))
     if hors_profil:
         info("Autres applis désactivées (hors profil) : %s" % ", ".join(hors_profil))
     info("↳ = appli liée, suit automatiquement l'appli au-dessus.")
+    info("♥ = vous l'utilisez (statistiques de la TV) : jamais désactivée d'office.")
+    for r in profil.remplacements:
+        if r["remplace"] in tous and r["paquet"] not in tous:
+            info("Proposé : %s à la place de %s →  python3 lolos.py remplacer %s"
+                 % (r["nom"], profil.nom(r["remplace"]), r["nom"].lower()))
     return 0
 
 
 # ---- appliquer ----
 
-def questions_interactives(profil, tous, desactives):
+def questions_interactives(profil, tous, desactives, trouvees, usage):
     choix = {}
     info("Pour chaque appli, répondez o si vous l'utilisez (elle reste active), n sinon (elle est désactivée).")
     info("Rien n'est appliqué avant la confirmation finale.")
@@ -1256,6 +1481,7 @@ def questions_interactives(profil, tous, desactives):
         if not cat.get("demander"):
             continue
         paquets = [p for p in profil.visibles() if p["categorie"] == cat["id"] and p["id"] in tous]
+        paquets += sorted((t for t in trouvees.values() if t["categorie"] == cat["id"]), key=lambda t: t["nom"].lower())
         if not paquets:
             continue
         info("\n== %s ==" % cat["titre"])
@@ -1263,22 +1489,30 @@ def questions_interactives(profil, tous, desactives):
             info("   " + cat["description"])
         for p in paquets:
             deja = p["id"] in desactives
-            defaut = False if deja else p.get("defaut") != "desactiver"
+            favori = est_favori(usage, p["id"])
+            defaut = False if deja else favori or p.get("defaut") != "desactiver"
             if p.get("note"):
                 info("   Note : %s" % p["note"])
-            garder = demander_oui_non("  Utilisez-vous %s ?%s" % (p["nom"], " (actuellement désactivée)" if deja else ""),
-                                      defaut)
+            garder = demander_oui_non("  Utilisez-vous %s ?%s%s" % (
+                p["nom"], " ♥ (%s)" % texte_utilisation(usage[p["id"]]) if favori else "",
+                " (actuellement désactivée)" if deja else ""), defaut)
             choix[p["id"]] = "activer" if garder else "desactiver"
     return choix
 
 
-def calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, valeurs_reglages):
-    """Renvoie (actions, conservees, infos). Chaque action : dict(type, id, nom, …)."""
-    choix, raisons = {}, {}
+def calculer_plan(profil, args, tous, desactives, trouvees, usage, choix_interactifs, valeurs_reglages):
+    """Renvoie (actions, conservees, infos). Chaque action : dict(type, id, nom, …).
+    trouvees : applis de la TV hors profil (inventaire) ; usage : temps d'utilisation par appli."""
+    choix, raisons, utilisees = {}, {}, []
     for p in profil.visibles():
         cat = profil.cat.get(p["categorie"], {})
         if not cat.get("demander") or args.defauts:
-            choix[p["id"]] = "desactiver" if p.get("defaut") == "desactiver" else "laisser"
+            desactiver = p.get("defaut") == "desactiver"
+            # Une appli que vous utilisez n'est pas désactivée d'office (sauf télémétrie et pubs).
+            if desactiver and cat.get("demander") and est_favori(usage, p["id"]) and p["id"] in tous:
+                desactiver = False
+                utilisees.append(p["id"])
+            choix[p["id"]] = "desactiver" if desactiver else "laisser"
             raisons[p["id"]] = "profil"
         else:
             choix[p["id"]] = "laisser"
@@ -1292,7 +1526,7 @@ def calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, vale
     for ids, action in ((brut_desactiver, "desactiver"), (brut_garder, "activer")):
         for i in ids:
             if i in profil.cat:
-                for p in profil.visibles():
+                for p in list(profil.visibles()) + list(trouvees.values()):
                     if p["categorie"] == i:
                         explicites[p["id"]] = action
     for ids, action in ((brut_desactiver, "desactiver"), (brut_garder, "activer")):
@@ -1309,9 +1543,10 @@ def calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, vale
             if pid not in tous:
                 raise Erreur("Paquet inconnu du profil et absent de la TV : %s" % pid)
             if action == "desactiver":
-                if pid not in tiers:
-                    raise Erreur("%s ne fait pas partie du profil et c'est une appli système : refusé par prudence." % pid)
-                avertir("%s ne fait pas partie du profil (appli tierce) : elle sera désactivée." % pid)
+                if pid not in trouvees:
+                    raise Erreur("%s ne fait partie ni du profil ni de la liste d'applis de la TV : refusé par "
+                                 "prudence." % pid)
+                avertir("%s (%s) ne fait pas partie du profil : elle sera désactivée." % (trouvees[pid]["nom"], pid))
                 hors_profil.append(pid)
     choix.update(explicites)
     # Les applis liées (module Netflix, webapp Canal+…) suivent leur appli principale.
@@ -1330,7 +1565,7 @@ def calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, vale
     cles = sorted(choix, key=lambda pid: (profil.par_id.get(pid, {}).get("priorite", 1), ordre.get(pid, 10 ** 6)))
     actions, conservees, absentes, deja = [], [], [], []
     for pid in cles:
-        action, nom = choix[pid], profil.nom(pid)
+        action, nom = choix[pid], trouvees[pid]["nom"] if pid in trouvees else profil.nom(pid)
         if pid not in tous:
             if action != "laisser":
                 absentes.append(pid)
@@ -1357,7 +1592,8 @@ def calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, vale
         if actuel != r["valeur"]:
             actions.append({"type": "reglage", "id": "%s/%s" % (r["ns"], r["cle"]), "ns": r["ns"], "cle": r["cle"],
                             "valeur": r["valeur"], "avant": actuel, "nom": r.get("pourquoi", "")})
-    return actions, conservees, {"absentes": absentes, "deja_desactivees": deja, "hors_profil": hors_profil}
+    return actions, conservees, {"absentes": absentes, "deja_desactivees": deja, "hors_profil": hors_profil,
+                                 "gardees_car_utilisees": utilisees}
 
 
 def decrire_action(a):
@@ -1426,11 +1662,23 @@ def lire_reglages(adb, cles):
     return {c: (None if v in ("null", "") else v) for c, v in r.items()}
 
 
+def memoriser_desactivations(adb, resultats):
+    """Mémorise ce que lolos a désactivé sur cette TV (sert à « verifier »)."""
+    config = lire_config()
+    ident = adb.identifiant()
+    memo = set(config.setdefault("desactives_par_lolos", {}).get(ident, []))
+    memo |= set(a["id"] for a in resultats if a["type"] == "desactiver" and a["ok"])
+    memo -= set(a["id"] for a in resultats if a["type"] == "activer" and a["ok"])
+    config["desactives_par_lolos"][ident] = sorted(memo)
+    ecrire_config(config)
+
+
 def cmd_appliquer(args):
     profil = charger_profil(getattr(args, "profil", None))
     adb = appareil(args)
     avertir_si_pas_bbox(adb, profil)
     tous, desactives, tiers = adb.paquets()
+    trouvees, usage = inventaire(adb, profil, tiers)
     sauvegarde = None
     if not args.simulation:
         sauvegarde = exiger_sauvegarde(adb, args)
@@ -1438,9 +1686,13 @@ def cmd_appliquer(args):
     if args.interactif:
         if SORTIE_JSON:
             raise Erreur("--interactif et --json sont incompatibles.")
-        choix_interactifs = questions_interactives(profil, tous, desactives)
+        choix_interactifs = questions_interactives(profil, tous, desactives, trouvees, usage)
     valeurs = lire_reglages(adb, ["%s/%s" % (r["ns"], r["cle"]) for r in profil.reglages])
-    actions, conservees, details = calculer_plan(profil, args, tous, desactives, tiers, choix_interactifs, valeurs)
+    actions, conservees, details = calculer_plan(profil, args, tous, desactives, trouvees, usage, choix_interactifs,
+                                                 valeurs)
+
+    def nom(pid):
+        return trouvees[pid]["nom"] if pid in trouvees else profil.nom(pid)
 
     if not SORTIE_JSON:
         info("\nPlan%s :" % (" (simulation, rien ne sera modifié)" if args.simulation else ""))
@@ -1449,7 +1701,9 @@ def cmd_appliquer(args):
         for i, a in enumerate(actions, 1):
             info("  %2d. %s" % (i, decrire_action(a)))
         if conservees:
-            info("\nRestent actives : %s" % ", ".join(profil.nom(p) for p in conservees))
+            info("\nRestent actives : %s" % ", ".join(nom(p) for p in conservees))
+        if details["gardees_car_utilisees"]:
+            info("Gardées car vous les utilisez ♥ : %s" % ", ".join(nom(p) for p in details["gardees_car_utilisees"]))
         if details["deja_desactivees"]:
             info("Déjà désactivées : %d" % len(details["deja_desactivees"]))
         if details["absentes"]:
@@ -1476,14 +1730,7 @@ def cmd_appliquer(args):
     if reactivees:
         avertir("Réactivées toutes seules juste après : %s (SML/SpyObject encore actif ? Redémarrez la TV puis "
                 "relancez « appliquer »)." % ", ".join(reactivees))
-    # Mémorise ce que lolos a désactivé sur cette TV (sert à « verifier »).
-    config = lire_config()
-    ident = adb.identifiant()
-    memo = set(config.setdefault("desactives_par_lolos", {}).get(ident, []))
-    memo |= set(a["id"] for a in resultats if a["type"] == "desactiver" and a["ok"])
-    memo -= set(a["id"] for a in resultats if a["type"] == "activer" and a["ok"])
-    config["desactives_par_lolos"][ident] = sorted(memo)
-    ecrire_config(config)
+    memoriser_desactivations(adb, resultats)
 
     echecs = [a for a in resultats if not a["ok"]]
     if SORTIE_JSON:
@@ -1496,6 +1743,105 @@ def cmd_appliquer(args):
             info("• " + a)
         info("Annuler à tout moment :  python3 lolos.py restaurer")
     return 1 if echecs else 0
+
+
+# ---- remplacer (ex. YouTube → SmartTube) ----
+
+def apk_github(depot, prefixe, abi):
+    """APK de la dernière version publiée sur GitHub pour ce processeur : (version, nom du fichier, URL)."""
+    url = "https://api.github.com/repos/%s/releases/latest" % depot
+    requete = urllib.request.Request(url, headers={"User-Agent": "lolos/" + VERSION,
+                                                   "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(requete, timeout=30) as reponse:
+            version = json.loads(reponse.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise Erreur("Impossible de lire la dernière version de %s sur GitHub : %s" % (depot, getattr(e, "reason", e)))
+    fichiers = version.get("assets") or []
+    for suffixe in ("_%s.apk" % abi, "_universal.apk"):
+        for f in fichiers:
+            if f.get("name", "").startswith(prefixe) and f["name"].endswith(suffixe):
+                return version.get("tag_name", ""), f["name"], f["browser_download_url"]
+    raise Erreur("Pas d'APK %s… pour ce processeur (%s) dans la dernière version de %s." % (prefixe, abi, depot))
+
+
+def trouver_remplacement(profil, quoi):
+    q = quoi.strip().lower()
+    for r in profil.remplacements:
+        if q in (r["paquet"].lower(), r["nom"].lower(), r["remplace"].lower(), profil.nom(r["remplace"]).lower()):
+            return r
+    raise Erreur("Remplacement inconnu : %s. Disponibles : %s" % (quoi, ", ".join(
+        "%s (à la place de %s)" % (r["nom"], profil.nom(r["remplace"])) for r in profil.remplacements) or "aucun"))
+
+
+def cmd_remplacer(args):
+    profil = charger_profil(getattr(args, "profil", None))
+    adb = appareil(args)
+    tous, desactives, _ = adb.paquets()
+    if not args.quoi:
+        liste = [{"paquet": r["paquet"], "nom": r["nom"], "remplace": r["remplace"], "remplace_nom": profil.nom(r["remplace"]),
+                  "installe": r["paquet"] in tous, "remplace_present": r["remplace"] in tous,
+                  "remplace_desactive": r["remplace"] in desactives, "description": r.get("description"),
+                  "avertissement": r.get("avertissement")} for r in profil.remplacements]
+        if SORTIE_JSON:
+            afficher_json({"remplacements": liste})
+            return 0
+        for r in liste:
+            info("%s à la place de %s — %s" % (r["nom"], r["remplace_nom"], "déjà installé" if r["installe"] else "non installé"))
+            info("   " + (r["description"] or ""))
+        info("\nPour remplacer :  python3 lolos.py remplacer %s" % (liste[0]["nom"].lower() if liste else "NOM"))
+        return 0
+
+    r = trouver_remplacement(profil, args.quoi)
+    ancienne, nom_ancienne = r["remplace"], profil.nom(r["remplace"])
+    # Installé mais désactivé : réinstallé puis réactivé, sinon il ne resterait aucune appli YouTube utilisable.
+    installer = r["paquet"] not in tous or r["paquet"] in desactives
+    desactiver = not args.garder_ancienne and ancienne in tous and ancienne not in desactives
+    if desactiver and "fr.bouyguestelecom.tv.sml" in tous and "fr.bouyguestelecom.tv.sml" not in desactives:
+        raise Erreur("SML (SpyObject) est encore actif : il réactiverait %s aussitôt. Lancez d'abord  "
+                     "python3 lolos.py appliquer  (il désactive SML en premier), puis cette commande." % nom_ancienne)
+    abi = adb.texte("getprop ro.product.cpu.abi")
+    if not SORTIE_JSON:
+        info("Plan%s :" % (" (simulation, rien ne sera modifié)" if args.simulation else ""))
+        if installer:
+            info("  1. %s %s (dernière version publiée sur github.com/%s, APK %s)" % (
+                "Réinstaller et réactiver" if r["paquet"] in desactives else "Installer", r["nom"], r["depot"], abi))
+        else:
+            info("  ✓ %s est déjà installé." % r["nom"])
+        if desactiver:
+            info("  %d. Désactiver %s (%s) — pas désinstallé" % (2 if installer else 1, nom_ancienne, ancienne))
+    if args.simulation or not (installer or desactiver):
+        if SORTIE_JSON:
+            afficher_json({"simulation": args.simulation, "installer": installer, "desactiver": desactiver})
+        return 0
+    if desactiver:
+        exiger_sauvegarde(adb, args)
+    confirmer(args, "\nContinuer ?")
+    journaliser("== lolos remplacer %s → %s sur %s" % (ancienne, r["paquet"], adb.serie))
+    if installer:
+        version, fichier, url = apk_github(r["depot"], r["fichier"], abi)
+        apk = telecharger(url, CACHE / fichier, "%s %s" % (r["nom"], version))
+        info("Installation de %s…" % r["nom"])
+        res = adb.lancer(["install", "-r", str(apk)], 300)
+        journaliser("adb install -r %s" % apk.name)
+        if "Success" not in res.sortie:
+            raise Erreur("Installation de %s impossible : %s\n%s n'a pas été désactivé." % (
+                r["nom"], (res.sortie + res.erreur).strip(), nom_ancienne))
+        _effacer(apk)
+        if r["paquet"] in desactives:
+            adb.shell("pm enable %s" % r["paquet"])
+        info("✅ %s installé." % r["nom"])
+    resultats = []
+    if desactiver:
+        resultats = executer_plan(adb, [{"type": "desactiver", "id": ancienne, "nom": nom_ancienne}])
+        memoriser_desactivations(adb, resultats)
+    if SORTIE_JSON:
+        afficher_json({"simulation": False, "installe": installer, "resultats": resultats})
+    else:
+        if r.get("avertissement"):
+            info("• " + r["avertissement"])
+        info("Revenir en arrière :  python3 lolos.py appliquer --garder %s" % ancienne)
+    return 1 if any(not a["ok"] for a in resultats) else 0
 
 
 # ---- sauvegarder ----
@@ -1578,24 +1924,36 @@ def trouver_fonds(option):
     if locaux:
         return locaux
     cache = CACHE / "fonds"
-    if sorted(cache.glob("*.mp4")):
-        return sorted(cache.glob("*.mp4"))
+    marque = cache / "version"
+    try:
+        a_jour = marque.read_text(encoding="utf-8").strip() == VERSION_FONDS
+    except OSError:
+        a_jour = False
+    anciens = sorted(cache.glob("*.mp4"))
+    if a_jour and anciens:
+        return anciens
     try:
         archive = telecharger(URL_RELEASE + "fonds.zip", CACHE / "fonds.zip", "les fonds animés (fonds.zip)")
     except Erreur as e:
+        if anciens:
+            avertir("Nouveaux fonds animés indisponibles (%s) : anciens gardés." % e)
+            return anciens
         avertir("Fonds animés indisponibles (%s) : le lanceur utilisera son fond par défaut." % e)
         return []
     cache.mkdir(parents=True, exist_ok=True)
     try:
         with zipfile.ZipFile(str(archive)) as z:
+            for ancien in anciens:
+                _effacer(ancien)
             for membre in z.infolist():
                 nom = Path(membre.filename).name  # aplatit et neutralise tout chemin
                 if nom.lower().endswith(".mp4") and not nom.startswith("."):
                     with z.open(membre) as source, open(str(cache / nom), "wb") as cible:
                         shutil.copyfileobj(source, cible)
+        marque.write_text(VERSION_FONDS, encoding="utf-8")
     except zipfile.BadZipFile:
         avertir("fonds.zip est corrompu : fonds ignorés.")
-        return []
+        return anciens
     finally:
         _effacer(archive)
     return sorted(cache.glob("*.mp4"))
@@ -2460,7 +2818,7 @@ def construire_parseur():
     sp.add_argument("--dossier", metavar="D", help="dossier de destination (défaut : ./sauvegardes/AAAA-MM-JJ_HHMMSS)")
     sp.set_defaults(fonction=cmd_sauvegarder)
 
-    sp = commande("lister", "lister les applis du profil présentes sur la TV")
+    sp = commande("lister", "lister les applis de la TV (celles du profil et toutes les autres trouvées)")
     sp.add_argument("--tous", action="store_true", help="inclure aussi les applis absentes de cette TV")
     sp.set_defaults(fonction=cmd_lister)
 
@@ -2475,6 +2833,15 @@ def construire_parseur():
     sp.add_argument("--simulation", action="store_true", help="afficher le plan sans rien modifier")
     sp.add_argument("--sans-sauvegarde", action="store_true", help="ne pas exiger de sauvegarde préalable (déconseillé)")
     sp.set_defaults(fonction=cmd_appliquer)
+
+    sp = commande("remplacer", "remplacer une appli par une meilleure (ex. YouTube → SmartTube, sans pubs)",
+                  "Sans argument : liste les remplacements proposés. Avec un nom : télécharge la dernière version "
+                  "publiée sur GitHub, l'installe, puis désactive l'appli remplacée (sans la désinstaller).")
+    sp.add_argument("quoi", nargs="?", metavar="NOM", help="remplacement à faire (ex. smarttube ou youtube)")
+    sp.add_argument("--garder-ancienne", action="store_true", help="installer sans désactiver l'appli remplacée")
+    sp.add_argument("--simulation", action="store_true", help="afficher le plan sans rien modifier")
+    sp.add_argument("--sans-sauvegarde", action="store_true", help="ne pas exiger de sauvegarde préalable (déconseillé)")
+    sp.set_defaults(fonction=cmd_remplacer)
 
     sp = commande("accueil", "installer le lanceur « Accueil » minimaliste et ses fonds animés")
     sp.add_argument("--apk", metavar="CHEMIN", help="APK du lanceur (défaut : android/Accueil.apk, sinon téléchargé)")

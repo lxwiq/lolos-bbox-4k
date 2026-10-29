@@ -1,6 +1,7 @@
 //! Installateur graphique de Lol'OS : commandes appelées par l'interface (src/).
 
 mod adb;
+mod arsc;
 mod operations;
 mod profil;
 mod reseau;
@@ -215,6 +216,17 @@ async fn appliquer(
     en_fond(move || {
         let j = |m: String| journal(&app, &dossier, m);
         operations::appliquer(&Tv { adb: &adb, serie: &serie }, &profil, &desactiver, simulation, &j)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn installer_remplacement(paquet: String, app: AppHandle, etat: State<'_, Appli>) -> Result<(), String> {
+    let (adb, serie) = etat.contexte()?;
+    let (profil, dossier) = (etat.profil.clone(), etat.dossier.clone());
+    en_fond(move || {
+        let j = |m: String| journal(&app, &dossier, m);
+        operations::installer_remplacement(&Tv { adb: &adb, serie: &serie }, &profil, &dossier, &paquet, &j)
     })
     .await
 }
@@ -484,6 +496,7 @@ pub fn run() {
             sauvegardes,
             paquets,
             appliquer,
+            installer_remplacement,
             installer_accueil,
             capture,
             tester_direct,
@@ -529,6 +542,9 @@ mod essais {
         let presents = paquets.iter().filter(|p| p.present).count();
         let off = paquets.iter().filter(|p| p.desactive).count();
         println!("profil : {} paquets, {presents} présents, {off} déjà désactivés", paquets.len());
+        for p in paquets.iter().filter(|p| p.trouvee || p.favori) {
+            println!("  {} {} ({}){}", if p.favori { "♥" } else { " " }, p.nom, p.id, if p.trouvee { " — hors profil" } else { "" });
+        }
 
         let defauts: Vec<String> = paquets.iter().filter(|p| p.defaut == "desactiver").map(|p| p.id.clone()).collect();
         let n = operations::appliquer(&tv, &profil, &defauts, true, &|m| println!("  {m}")).unwrap();
@@ -539,6 +555,22 @@ mod essais {
         println!("sauvegarde : {} ({} fichiers)", s.display(), std::fs::read_dir(&s).unwrap().count());
         assert!(operations::capture_png(&tv, &s.join("capture-essai.png")).unwrap().starts_with(&[0x89, b'P', b'N', b'G']));
         println!("capture : PNG valide");
+    }
+}
+
+#[cfg(test)]
+mod essais_remplacements {
+    /// `cargo test remplacements -- --ignored --nocapture` : trouve les APK sur GitHub (rien n'est installé).
+    #[test]
+    #[ignore]
+    fn remplacements() {
+        for r in super::profil::charger().remplacements {
+            for abi in ["armeabi-v7a", "inconnu"] {
+                let (version, url) = super::operations::apk_github(&r.depot, &r.fichier, abi).unwrap();
+                println!("{} {version} ({abi}) : {url}", r.nom);
+                assert!(url.starts_with("https://github.com/") && url.ends_with(".apk"));
+            }
+        }
     }
 }
 

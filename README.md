@@ -105,8 +105,9 @@ Pour les habitués du terminal, `cli/lolos.py` fait la même chose (Python 3.8+,
 python3 cli/lolos.py chercher            # trouve la TV sur le réseau
 python3 cli/lolos.py connecter 192.168.1.x
 python3 cli/lolos.py sauvegarder         # toujours en premier
-python3 cli/lolos.py lister              # applis du profil présentes sur la TV
+python3 cli/lolos.py lister              # toutes les applis de la TV, ♥ = celles que vous utilisez
 python3 cli/lolos.py appliquer --interactif     # vous demande, catégorie par catégorie
+python3 cli/lolos.py remplacer smarttube # YouTube sans pubs (SmartTube) à la place de YouTube
 python3 cli/lolos.py accueil             # installe l'écran d'accueil et les paysages
 python3 cli/lolos.py verifier --direct   # vérifie tout, y compris la TV en direct
 python3 cli/lolos.py restaurer           # remet la TV comme avant
@@ -169,6 +170,14 @@ Lol'OS parle à la TV avec **ADB** (Android Debug Bridge), l'outil officiel de G
 **Désactiver, pas désinstaller.** Chaque appli est arrêtée (`am force-stop`) puis désactivée pour l'utilisateur
 (`pm disable-user`). Elle disparaît, ne tourne plus, mais reste sur la TV : `pm enable` la fait revenir.
 La liste complète, avec ce que fait chaque appli, est dans [`profil/bbox-4k.json`](profil/bbox-4k.json).
+Les applis que le profil ne connaît pas (installées en plus, ou propres à votre box) sont trouvées
+automatiquement sur la TV, avec leur vrai nom, dans « Autres applis » : elles restent actives sauf si vous
+les cochez. Un **♥** marque les applis que vous utilisez (d'après les statistiques de la TV) : elles ne
+sont jamais désactivées d'office.
+
+**YouTube sans pubs.** Lol'OS propose de remplacer YouTube par [SmartTube](https://github.com/yuliskov/SmartTube),
+logiciel libre sans publicités ni sponsors : la dernière version est téléchargée depuis GitHub, installée,
+puis YouTube est désactivé (pas désinstallé, « Restaurer » le réactive).
 
 **Ce qu'on a découvert sur la Bbox 4K :**
 

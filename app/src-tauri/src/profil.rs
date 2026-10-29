@@ -33,6 +33,33 @@ pub struct Proteges {
     pub paquets: Vec<String>,
 }
 
+/// Où ranger les applis de la TV que le profil ne connaît pas.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Decouverte {
+    pub categorie: String,
+}
+
+impl Default for Decouverte {
+    fn default() -> Self {
+        Decouverte { categorie: "autres".into() }
+    }
+}
+
+/// Appli à installer à la place d'une autre (ex. SmartTube pour YouTube), publiée sur GitHub.
+#[derive(Deserialize, Serialize, Clone)]
+pub struct Remplacement {
+    pub paquet: String,
+    pub nom: String,
+    pub remplace: String,
+    pub description: String,
+    #[serde(default)]
+    pub avertissement: Option<String>,
+    /// dépôt GitHub « propriétaire/projet »
+    pub depot: String,
+    /// début du nom de l'APK ; la fin est « _<processeur>.apk » ou « _universal.apk »
+    pub fichier: String,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 pub struct Reglage {
     pub ns: String,
@@ -55,6 +82,10 @@ pub struct Profil {
     pub nom: String,
     pub categories: Vec<Categorie>,
     pub paquets: Vec<Paquet>,
+    #[serde(default)]
+    pub remplacements: Vec<Remplacement>,
+    #[serde(default)]
+    pub decouverte: Decouverte,
     pub proteges: Proteges,
     pub reglages: Vec<Reglage>,
     pub reglages_sauvegardes: Vec<String>,

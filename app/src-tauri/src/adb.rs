@@ -130,6 +130,20 @@ pub fn shell(adb: &Path, serie: &str, cmd: &str) -> Result<String, String> {
     executer(adb, &["-s", serie, "shell", cmd])
 }
 
+/// Sortie binaire d'une commande sur la TV (`exec-out` : octets bruts, sans pseudo-terminal).
+pub fn octets(adb: &Path, serie: &str, cmd: &str) -> Result<Vec<u8>, String> {
+    tracer("cmd", format!("adb -s {serie} exec-out {cmd}"));
+    let sortie = commande(adb).args(["-s", serie, "exec-out", cmd]).output().map_err(|e| e.to_string())?;
+    if sortie.status.success() {
+        tracer("out", format!("{} octets", sortie.stdout.len()));
+        Ok(sortie.stdout)
+    } else {
+        let erreur = String::from_utf8_lossy(&sortie.stderr).trim().to_string();
+        tracer("err", extrait(&erreur));
+        Err(erreur)
+    }
+}
+
 /// Paquets renvoyés par `pm list packages <option>`.
 pub fn paquets(adb: &Path, serie: &str, option: &str) -> Result<Vec<String>, String> {
     Ok(shell(adb, serie, &format!("pm list packages {option}"))?

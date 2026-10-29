@@ -2,12 +2,14 @@
 //! vérification, restauration. Mêmes règles que cli/lolos.py.
 
 use crate::adb;
+use crate::arsc;
 use crate::profil::Profil;
 use base64::Engine;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 
@@ -16,6 +18,9 @@ pub const DEPOT: &str = "lxwiq/lolos-bbox-4k";
 const APK: &[u8] = include_bytes!("../../../android/Accueil.apk");
 /// Numéro de version de l'APK embarqué (écrit par android/compiler.sh).
 const APK_VERSION: &str = include_str!("../../../android/Accueil.version");
+/// Révision de fonds.zip : à augmenter quand les vidéos changent, pour que les caches plus anciens soient
+/// retéléchargés (2 : forêt et nuages ralentis, version 1.2.0). Même valeur que VERSION_FONDS du CLI.
+const VERSION_FONDS: &str = "2";
 
 pub fn version_accueil_embarquee() -> u32 {
     APK_VERSION.trim().parse().unwrap_or(0)
@@ -153,6 +158,9 @@ pub fn sauvegardes(dossier_racine: &Path) -> Vec<String> {
     v
 }
 
+/// Temps d'utilisation au-delà duquel une appli est marquée ❤ (et n'est jamais cochée d'office).
+const FAVORI_SECONDES: u64 = 60;
+
 #[derive(Serialize)]
 pub struct PaquetTv {
     pub id: String,
@@ -163,12 +171,148 @@ pub struct PaquetTv {
     pub cache: bool,
     pub present: bool,
     pub desactive: bool,
+    /// trouvée sur la TV, absente du profil
+    pub trouvee: bool,
+    pub utilisation: Option<Utilisation>,
+    pub favori: bool,
 }
 
+#[derive(Serialize, Clone)]
+pub struct Utilisation {
+    pub secondes: u64,
+    /// « AAAA-MM-JJ hh:mm:ss »
+    pub derniere: String,
+    pub lancements: u64,
+}
+
+/// Nom d'appli tel qu'Android le donne : texte, ou identifiant de ressource à lire dans l'APK.
+enum Libelle {
+    Texte(String),
+    Ressource(u32),
+}
+
+/// Appli de la liste d'applis de la TV.
+struct Lanceable {
+    libelle: Option<Libelle>,
+    apk: Option<String>,
+}
+
+/// Valeur de `cle` (« packageName= »…) sur la première ligne qui la porte.
+fn champ<'a>(texte: &'a str, cle: &str) -> Option<&'a str> {
+    texte.lines().find_map(|l| l.trim().strip_prefix(cle)?.split_whitespace().next())
+}
+
+/// « labelRes=0x7f080000 nonLocalizedLabel=null icon=… »
+fn libelle_brut(texte: &str) -> Option<Libelle> {
+    let ligne = texte.lines().map(str::trim).find(|l| l.starts_with("labelRes="))?;
+    let brut = ligne.split_once("nonLocalizedLabel=")?.1;
+    let brut = brut.rsplit_once(" icon=").map_or(brut, |(a, _)| a).trim();
+    if brut != "null" && !brut.is_empty() {
+        return Some(Libelle::Texte(brut.to_string()));
+    }
+    let id = u32::from_str_radix(ligne.strip_prefix("labelRes=0x")?.split_whitespace().next()?, 16).ok()?;
+    (id != 0).then_some(Libelle::Ressource(id))
+}
+
+/// Applis de la liste d'applis de la TV (Android TV et Android), avec de quoi retrouver leur nom.
+/// Les applis désactivées n'y figurent pas.
+fn lanceables(tv: &Tv) -> Result<HashMap<String, Lanceable>, String> {
+    let mut res = HashMap::new();
+    for categorie in ["LEANBACK_LAUNCHER", "LAUNCHER"] {
+        let sortie = tv.sh(&format!(
+            "cmd package query-activities -a android.intent.action.MAIN -c android.intent.category.{categorie}"
+        ))?;
+        for bloc in sortie.split("Activity #").skip(1) {
+            let (activite, appli) = bloc.split_once("ApplicationInfo:").unwrap_or((bloc, ""));
+            let Some(id) = champ(activite, "packageName=") else { continue };
+            res.entry(id.to_string()).or_insert_with(|| Lanceable {
+                // le nom de l'activité est celui affiché dans la liste d'applis, sinon celui de l'appli
+                libelle: libelle_brut(activite).or_else(|| libelle_brut(appli)),
+                apk: champ(appli, "sourceDir=").map(str::to_string),
+            });
+        }
+    }
+    Ok(res)
+}
+
+/// Noms déjà lus, par APK et ressource (le chemin de l'APK change à chaque mise à jour de l'appli).
+static NOMS: OnceLock<Mutex<HashMap<(String, u32), Option<String>>>> = OnceLock::new();
+
+/// Vrai nom de l'appli : lu dans le resources.arsc de son APK, extrait sur la TV.
+fn nom_appli(tv: &Tv, l: &Lanceable) -> Option<String> {
+    let id = match l.libelle.as_ref()? {
+        Libelle::Texte(t) => return Some(t.clone()),
+        Libelle::Ressource(id) => *id,
+    };
+    let apk = l.apk.as_ref().filter(|a| !a.contains('\''))?;
+    let cache = NOMS.get_or_init(Default::default);
+    let cle = (apk.clone(), id);
+    if let Some(nom) = cache.lock().unwrap().get(&cle) {
+        return nom.clone();
+    }
+    let nom = adb::octets(tv.adb, tv.serie, &format!("unzip -p '{apk}' resources.arsc"))
+        .ok()
+        .and_then(|d| arsc::libelle(&d, id))
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty());
+    cache.lock().unwrap().insert(cle, nom.clone());
+    nom
+}
+
+/// Temps passé dans chaque appli d'après les statistiques d'Android (sur la plus longue période gardée).
+fn utilisation(tv: &Tv) -> HashMap<String, Utilisation> {
+    let mut res: HashMap<String, Utilisation> = HashMap::new();
+    for ligne in tv.sh("dumpsys usagestats").unwrap_or_default().lines() {
+        // package=org.exemple totalTimeUsed="6:59:48" lastTimeUsed="2026-10-27 22:21:26" … appLaunchCount=10
+        let Some(reste) = ligne.trim().strip_prefix("package=") else { continue };
+        let entre = |cle: &str| reste.split_once(cle).and_then(|(_, v)| v.split('"').next());
+        let (Some(id), Some(total)) = (reste.split_whitespace().next(), entre("totalTimeUsed=\"")) else { continue };
+        let secondes = total.split(':').try_fold(0u64, |s, n| Some(s * 60 + n.trim().parse::<u64>().ok()?)).unwrap_or(0);
+        let derniere = entre("lastTimeUsed=\"").unwrap_or("").to_string();
+        let lancements = reste
+            .split_once("appLaunchCount=")
+            .and_then(|(_, v)| v.split_whitespace().next()?.parse().ok())
+            .unwrap_or(0);
+        let u = res.entry(id.to_string()).or_insert(Utilisation { secondes: 0, derniere: String::new(), lancements: 0 });
+        u.secondes = u.secondes.max(secondes);
+        u.lancements = u.lancements.max(lancements);
+        if derniere > u.derniere {
+            u.derniere = derniere;
+        }
+    }
+    res.retain(|_, u| u.secondes > 0);
+    res
+}
+
+/// Applis de la TV absentes du profil : celles de la liste d'applis et celles installées en plus,
+/// sauf paquets protégés, Lol'OS et l'accueil actuel.
+fn hors_profil(tv: &Tv, profil: &Profil, lanceables: &HashMap<String, Lanceable>, tiers: &HashSet<String>) -> Vec<String> {
+    let accueil = tv.accueil_actuel();
+    let connus: HashSet<&str> = profil
+        .paquets
+        .iter()
+        .map(|p| p.id.as_str())
+        .chain(profil.proteges.paquets.iter().map(String::as_str))
+        .chain([profil.accueil.paquet.as_str(), accueil.split('/').next().unwrap_or("")])
+        .collect();
+    let mut ids: Vec<String> =
+        lanceables.keys().chain(tiers.iter()).filter(|id| !connus.contains(id.as_str())).cloned().collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Applis du profil, puis toutes les autres applis trouvées sur la TV.
 pub fn paquets(tv: &Tv, profil: &Profil) -> Result<Vec<PaquetTv>, String> {
     let tous: HashSet<String> = tv.paquets("-u")?.into_iter().collect();
     let off: HashSet<String> = tv.paquets("-d")?.into_iter().collect();
-    Ok(profil
+    let tiers: HashSet<String> = tv.paquets("-3")?.into_iter().collect();
+    let lanceables = lanceables(tv)?;
+    let mut usage = utilisation(tv);
+    // Seules les applis qu'on ouvre depuis la liste d'applis comptent (pas l'écran de veille, par exemple).
+    usage.retain(|id, _| lanceables.contains_key(id));
+    let favori = |id: &str| usage.get(id).is_some_and(|u| u.secondes >= FAVORI_SECONDES);
+    let mut liste: Vec<PaquetTv> = profil
         .paquets
         .iter()
         .map(|p| PaquetTv {
@@ -180,8 +324,31 @@ pub fn paquets(tv: &Tv, profil: &Profil) -> Result<Vec<PaquetTv>, String> {
             cache: p.cache,
             present: tous.contains(&p.id),
             desactive: off.contains(&p.id),
+            trouvee: false,
+            utilisation: usage.get(&p.id).cloned(),
+            favori: favori(&p.id),
         })
-        .collect())
+        .collect();
+    let mut trouvees: Vec<PaquetTv> = hors_profil(tv, profil, &lanceables, &tiers)
+        .into_iter()
+        .map(|id| PaquetTv {
+            nom: lanceables.get(&id).and_then(|l| nom_appli(tv, l)).unwrap_or_else(|| id.clone()),
+            categorie: profil.decouverte.categorie.clone(),
+            defaut: "garder".into(),
+            note: None,
+            cache: false,
+            present: true,
+            desactive: off.contains(&id),
+            trouvee: true,
+            utilisation: usage.get(&id).cloned(),
+            favori: favori(&id),
+            id,
+        })
+        .collect();
+    trouvees.sort_by_key(|p| p.nom.to_lowercase());
+    adb::tracer("info", format!("{} appli(s) hors profil trouvée(s) sur la TV", trouvees.len()));
+    liste.extend(trouvees);
+    Ok(liste)
 }
 
 /// Désactive (sans désinstaller) les paquets demandés, `sml` en premier, puis applique les réglages.
@@ -212,10 +379,16 @@ pub fn appliquer(
 
     let installes: HashSet<String> = tv.paquets("-u")?.into_iter().collect();
     let off: HashSet<String> = tv.paquets("-d")?.into_iter().collect();
+    let tiers: HashSet<String> = tv.paquets("-3")?.into_iter().collect();
+    let trouvees: HashSet<String> = hors_profil(tv, profil, &lanceables(tv)?, &tiers).into_iter().collect();
     let mut faits = 0;
     for id in &liste {
         if proteges.contains(id.as_str()) {
             journal(format!("⚠️ {id} est protégé (chaînes, système) : ignoré"));
+            continue;
+        }
+        if !profil.paquets.iter().any(|p| &p.id == id) && !trouvees.contains(id) {
+            journal(format!("⚠️ {id} n'est ni dans le profil ni dans la liste d'applis de la TV : ignoré par prudence"));
             continue;
         }
         if !installes.contains(id) || off.contains(id) {
@@ -239,6 +412,53 @@ pub fn appliquer(
         }
     }
     Ok(faits)
+}
+
+/// APK de la dernière version publiée sur GitHub pour ce processeur : (version, URL).
+pub fn apk_github(depot: &str, prefixe: &str, abi: &str) -> Result<(String, String), String> {
+    let api = format!("https://api.github.com/repos/{depot}/releases/latest");
+    let version: serde_json::Value =
+        serde_json::from_slice(&adb::telecharger_octets(&api)?).map_err(|e| format!("réponse GitHub illisible : {e}"))?;
+    let fichiers = version["assets"].as_array().cloned().unwrap_or_default();
+    let choisir = |suffixe: String| {
+        fichiers.iter().find_map(|f| {
+            let nom = f["name"].as_str()?;
+            (nom.starts_with(prefixe) && nom.ends_with(&suffixe)).then(|| f["browser_download_url"].as_str())?
+        })
+    };
+    let url = choisir(format!("_{abi}.apk"))
+        .or_else(|| choisir("_universal.apk".into()))
+        .ok_or(format!("pas d'APK {prefixe}… pour ce processeur ({abi}) sur github.com/{depot}"))?;
+    Ok((version["tag_name"].as_str().unwrap_or("").to_string(), url.to_string()))
+}
+
+/// Installe la dernière version GitHub d'une appli de remplacement (APK pour le processeur de la TV).
+/// L'appli remplacée est désactivée ensuite par `appliquer`, seulement si l'installation a réussi.
+pub fn installer_remplacement(
+    tv: &Tv,
+    profil: &Profil,
+    dossier_appli: &Path,
+    paquet: &str,
+    journal: &dyn Fn(String),
+) -> Result<(), String> {
+    let r = profil.remplacements.iter().find(|r| r.paquet == paquet).ok_or(format!("remplacement inconnu : {paquet}"))?;
+    let abi = tv.sh("getprop ro.product.cpu.abi")?.trim().to_string();
+    let (version, url) = apk_github(&r.depot, &r.fichier, &abi)?;
+    journal(format!("Téléchargement de {} {version}…", r.nom));
+    let apk = dossier_appli.join(format!("{}.apk", r.paquet));
+    std::fs::write(&apk, adb::telecharger_octets(&url)?).map_err(|e| e.to_string())?;
+    journal(format!("Installation de {}…", r.nom));
+    let installe = adb::executer(tv.adb, &["-s", tv.serie, "install", "-r", &apk.to_string_lossy()]);
+    let _ = std::fs::remove_file(&apk);
+    // Certains adb renvoient 0 même sur « Failure [...] » : seul « Success » vaut installation.
+    let sortie = installe?;
+    if !sortie.contains("Success") {
+        return Err(format!("installation de {} refusée : {}", r.nom, sortie.trim()));
+    }
+    // S'il avait été désactivé, l'installation ne le réactive pas.
+    tv.sh(&format!("pm enable {}", r.paquet))?;
+    journal(format!("✓ {} installé", r.nom));
+    Ok(())
 }
 
 /// Installe l'écran d'accueil, envoie les paysages, en fait l'accueil et l'écran de veille par défaut.
@@ -305,13 +525,27 @@ fn fonds_locaux(dossier_appli: &Path, journal: &dyn Fn(String)) -> Result<Vec<Pa
         v.sort();
         v
     };
-    if lister().is_empty() {
-        journal("Téléchargement des paysages (≈ 110 Mo)…".into());
+    let marque = cache.join("version");
+    let a_jour = std::fs::read_to_string(&marque).is_ok_and(|v| v.trim() == VERSION_FONDS);
+    if !a_jour || lister().is_empty() {
+        journal("Téléchargement des paysages (≈ 155 Mo)…".into());
         let url = format!("https://github.com/{DEPOT}/releases/latest/download/fonds.zip");
-        let octets = adb::telecharger_octets(&url)?;
-        std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+        let octets = match adb::telecharger_octets(&url) {
+            Ok(o) => o,
+            // Hors ligne : les anciens paysages font l'affaire
+            Err(e) if !lister().is_empty() => {
+                journal(format!("Nouveaux paysages indisponibles ({e}) : anciens gardés"));
+                return Ok(lister());
+            }
+            Err(e) => return Err(e),
+        };
         let mut archive = zip::ZipArchive::new(Cursor::new(octets)).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+        for ancienne in lister() {
+            let _ = std::fs::remove_file(ancienne);
+        }
         archive.extract(&cache).map_err(|e| e.to_string())?;
+        std::fs::write(&marque, VERSION_FONDS).map_err(|e| e.to_string())?;
     }
     let videos = lister();
     if videos.is_empty() {

@@ -289,12 +289,29 @@ $("#sauv-faire").addEventListener("click", (e) =>
 
 // ------------------------------------------------------------------ 5. applis
 
+/** « Utilisée 7 h 05 sur cette TV, la dernière fois le 27/10/2026 » */
+function texteUtilisation(u) {
+  if (!u) return "";
+  const h = Math.floor(u.secondes / 3600), m = Math.round((u.secondes % 3600) / 60);
+  const duree = h ? `${h} h${m ? " " + String(m).padStart(2, "0") : ""}` : `${Math.max(m, 1)} min`;
+  const [a, mo, j] = u.derniere.split(" ")[0].split("-");
+  return `Utilisée ${duree} sur cette TV` + (a && a !== "1970" ? `, la dernière fois le ${j}/${mo}/${a}` : "");
+}
+
 async function chargerApplis() {
   if (!etat.connecte) return;
   etat.profil ??= await invoke("profil");
   const p = etat.profil;
-  const paquets = await invoke("paquets");
+  $("#categories").innerHTML = '<p class="petit">Lecture des applis installées sur la TV…</p>';
+  let paquets;
+  try {
+    paquets = await invoke("paquets");
+  } catch (err) {
+    $("#categories").innerHTML = `<p class="petit">⚠️ Lecture des applis impossible : ${echapper(err)}</p>`;
+    return;
+  }
   $("#avertissements").innerHTML = p.avertissements.map((a) => `<div class="avertissement">${echapper(a)}</div>`).join("");
+  afficherRemplacements(p, paquets);
   $("#proteges").textContent = p.proteges.paquets.join(", ");
   $("#categories").innerHTML = "";
   for (const cat of p.categories) {
@@ -304,12 +321,14 @@ async function chargerApplis() {
     bloc.className = "carte categorie";
     bloc.innerHTML = `<header><h3>${echapper(cat.titre)}</h3><p>${echapper(cat.description)}</p></header><div class="paquets"></div>`;
     for (const x of liste) {
-      const coche = x.desactive || x.defaut === "desactiver";
+      // Une appli que vous utilisez n'est jamais cochée d'office (sauf télémétrie et pubs : demander = false).
+      const coche = x.desactive || (x.defaut === "desactiver" && !(x.favori && cat.demander));
+      const usage = texteUtilisation(x.utilisation);
       const label = document.createElement("label");
       label.className = "paquet" + (x.desactive ? " deja" : "");
-      label.title = x.note || "";
-      label.innerHTML = `<input type="checkbox" value="${x.id}" ${coche ? "checked" : ""} ${x.desactive ? "disabled" : ""}>
-        <span><span>${echapper(x.nom)}</span><small>${echapper(x.note || x.id)}</small></span>`;
+      label.title = [x.note, usage].filter(Boolean).join("\n");
+      label.innerHTML = `<input type="checkbox" value="${echapper(x.id)}" ${coche ? "checked" : ""} ${x.desactive ? "disabled" : ""}>
+        <span><span>${echapper(x.nom)}${x.favori ? ` <i class="coeur" title="${echapper(usage)}">♥</i>` : ""}</span><small>${echapper(x.note || x.id)}</small></span>`;
       bloc.querySelector(".paquets").append(label);
     }
     $("#categories").append(bloc);
@@ -317,19 +336,59 @@ async function chargerApplis() {
   resume();
 }
 
+/** Proposition « Remplacer YouTube par SmartTube » (profil : remplacements), si l'appli remplacée est là. */
+function afficherRemplacements(p, paquets) {
+  const zone = $("#remplacements");
+  zone.textContent = "";
+  for (const r of p.remplacements || []) {
+    const ancienne = paquets.find((x) => x.id === r.remplace && x.present);
+    if (!ancienne) continue;
+    // Installé mais désactivé : proposé comme à installer (l'installation le réactive).
+    const installe = paquets.some((x) => x.id === r.paquet && x.present && !x.desactive);
+    const bloc = document.createElement("div");
+    bloc.className = "carte remplacement";
+    bloc.innerHTML = installe
+      ? `<h3>✓ ${echapper(r.nom)} est installé</h3>
+         <p>Cochez ${echapper(ancienne.nom)} plus bas pour le désactiver. ${echapper(r.avertissement || "")}</p>`
+      : `<label class="choix"><input type="checkbox" data-remplacement="${echapper(r.paquet)}" data-remplace="${echapper(r.remplace)}">
+           <b>Remplacer ${echapper(ancienne.nom)} par ${echapper(r.nom)}</b></label>
+         <p>${echapper(r.description)}</p>${r.avertissement ? `<p>${echapper(r.avertissement)}</p>` : ""}`;
+    zone.append(bloc);
+  }
+}
+
+/** Remplacer coche (ou décoche) aussi l'appli remplacée dans la liste. */
+$("#remplacements").addEventListener("change", (e) => {
+  const c = e.target.closest("[data-remplace]");
+  const ancienne = c && document.querySelector(`#categories input[value="${c.dataset.remplace}"]`);
+  if (ancienne && !ancienne.disabled) ancienne.checked = c.checked;
+  resume();
+});
+
+function remplacementsChoisis() {
+  return [...document.querySelectorAll("#remplacements input:checked")].map((i) => i.dataset.remplacement);
+}
+
 function choisis() {
   return [...document.querySelectorAll("#categories input:checked:not(:disabled)")].map((i) => i.value);
 }
 
 function resume() {
-  const n = choisis().length;
-  $("#applis-resume").textContent = n ? `${n} appli${n > 1 ? "s" : ""} à désactiver` : "Rien de nouveau à désactiver";
+  const n = choisis().length, r = remplacementsChoisis().length;
+  const morceaux = [];
+  if (r) morceaux.push(`${r} appli${r > 1 ? "s" : ""} à installer`);
+  if (n) morceaux.push(`${n} appli${n > 1 ? "s" : ""} à désactiver`);
+  $("#applis-resume").textContent = morceaux.join(", ") || "Rien de nouveau à désactiver";
 }
 $("#categories").addEventListener("change", resume);
 
 $("#applis-simuler").addEventListener("click", (e) =>
   occupe(e.target, async () => {
     journal("— Ce qui sera fait —");
+    for (const paquet of remplacementsChoisis()) {
+      const r = etat.profil.remplacements.find((x) => x.paquet === paquet);
+      journal(`(simulation) installer ${r.nom} (dernière version publiée sur github.com/${r.depot})`);
+    }
     await invoke("appliquer", { desactiver: choisis(), simulation: true });
   })
 );
@@ -341,6 +400,12 @@ $("#applis-appliquer").addEventListener("click", (e) =>
       return aller("sauvegarde");
     }
     try {
+      // D'abord installer : si ça échoue, l'appli remplacée n'est pas désactivée.
+      for (const paquet of remplacementsChoisis()) {
+        await invoke("installer_remplacement", { paquet });
+        // Installé : ne pas le retélécharger si la suite échoue et qu'on réessaie.
+        document.querySelector(`#remplacements [data-remplacement="${paquet}"]`).checked = false;
+      }
       const n = await invoke("appliquer", { desactiver: choisis(), simulation: false });
       journal(`✓ ${n} appli(s) désactivée(s)`);
       faite("applis");

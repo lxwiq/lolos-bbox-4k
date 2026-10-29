@@ -77,6 +77,13 @@ Pour chaque catégorie `demander: true` qui a au moins une appli présente (`lis
 - **4 options au maximum par question** (au-delà, découpez : « Streaming (1/2) », « Streaming (2/2) ») et
   4 questions au maximum par appel (faites plusieurs appels si besoin) ;
 - libellé = nom de l'appli, description = sa note ou son état (« actuellement désactivée ») ;
+- `lister --json` contient aussi les applis de la TV absentes du profil (`trouvee: true`, catégorie
+  « Autres applis ») : posez la question pour elles aussi ;
+- `remplacements` (ex. SmartTube, YouTube sans pubs) : proposez-le à part (« Remplacer YouTube par SmartTube ? »,
+  avec sa `description` et son `avertissement`) ; si oui :
+  `python3 cli/lolos.py remplacer smarttube --simulation` puis la même commande avec `--oui` ;
+- `favori: true` (♥) = l'utilisateur s'en sert (`utilisation` : secondes, dernière fois) : ajoutez « ♥ vous
+  l'utilisez » à la description et ne la proposez jamais à la désactivation par défaut ;
 - rien de coché = aucune appli utilisée dans la catégorie.
 
 Mettez ces mises en garde dans la description des options concernées :

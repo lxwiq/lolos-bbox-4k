@@ -68,7 +68,7 @@
     {
       "id": "autres",
       "titre": "Autres applis",
-      "description": "Lecteurs et applis installées en plus.",
+      "description": "Applis installées en plus, trouvées sur votre TV. Elles restent actives sauf si vous les cochez.",
       "demander": true
     },
     {
@@ -191,6 +191,13 @@
       "nom": "DAZN",
       "categorie": "streaming",
       "defaut": "garder"
+    },
+    {
+      "id": "com.google.android.youtube.tv",
+      "nom": "YouTube",
+      "categorie": "streaming",
+      "defaut": "garder",
+      "note": "Remplaçable par SmartTube, sans publicités (voir plus haut)."
     },
     {
       "id": "com.amazon.amazonvideo.livingroom",
@@ -445,6 +452,21 @@
       "note": "Réinstalle silencieusement les applis du bouquet. Le bloquer peut empêcher des mises à jour d'applis Bbox poussées hors firmware."
     }
   ],
+  "remplacements": [
+    {
+      "paquet": "org.smarttube.stable",
+      "nom": "SmartTube",
+      "remplace": "com.google.android.youtube.tv",
+      "description": "YouTube sans publicités ni sponsors, logiciel libre (github.com/yuliskov/SmartTube). Vous pouvez vous connecter à votre compte YouTube. La dernière version est téléchargée depuis GitHub (≈ 25 Mo), puis YouTube est désactivé (pas désinstallé).",
+      "avertissement": "Pour caster depuis l'appli YouTube du téléphone, associez-le dans les réglages de SmartTube (code à saisir sur le téléphone).",
+      "depot": "yuliskov/SmartTube",
+      "fichier": "SmartTube_stable_"
+    }
+  ],
+  "decouverte": {
+    "note": "Les applis de la TV absentes de « paquets » (celles de la liste d'applis et celles installées en plus) sont ajoutées automatiquement dans cette catégorie, actives par défaut.",
+    "categorie": "autres"
+  },
   "proteges": {
     "note": "Jamais désactivés : chaînes TV, guide, DRM, décodage, télécommande, éligibilité TV, mises à jour, services Google de base.",
     "paquets": [
@@ -472,8 +494,7 @@
       "com.google.android.tungsten.setupwraith",
       "com.google.android.tv.remote.service",
       "com.android.tv.settings",
-      "com.android.providers.tv",
-      "com.google.android.youtube.tv"
+      "com.android.providers.tv"
     ]
   },
   "reglages": [

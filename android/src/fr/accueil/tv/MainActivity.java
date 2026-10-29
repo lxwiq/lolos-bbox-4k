@@ -492,11 +492,11 @@ public class MainActivity extends Activity {
         return !p.nuit() || n.contains("aurore") || n.contains("riviere") || n.contains("ocean") || n.contains("nuit");
     }
 
-    /** Ferme les applis restées en arrière-plan (sauf TV en direct, Chromecast, YouTube). */
+    /** Ferme les applis restées en arrière-plan (sauf TV en direct, Chromecast, YouTube et SmartTube). */
     private final Runnable nettoyer = () -> {
         ActivityManager am = getSystemService(ActivityManager.class);
         Set<String> epargnees = new HashSet<>(Arrays.asList(Apps.BBUI, "com.google.android.apps.mediashell",
-                "com.google.android.youtube.tv", getPackageName()));
+                "com.google.android.youtube.tv", "org.smarttube.stable", getPackageName()));
         for (Apps.Entry e : apps.all) {
             if (e.packageName != null && !epargnees.contains(e.packageName)) am.killBackgroundProcesses(e.packageName);
         }
