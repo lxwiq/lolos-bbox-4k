@@ -73,8 +73,9 @@ fn libelle_niveau(d: &[u8], id: u32, profondeur: u8) -> Option<String> {
 fn entree(d: &[u8], bloc: usize, entete: usize, eid: usize) -> Option<(u8, u32)> {
     let (drapeaux, nombre, debut) = (*d.get(bloc + 9)?, u32_a(d, bloc + 12)? as usize, u32_a(d, bloc + 16)? as usize);
     let decalage = if drapeaux & 0x01 != 0 {
-        // creux : paires (index, décalage / 4) triées
-        (0..nombre).find_map(|i| {
+        // creux : paires (index, décalage / 4) triées ; nombre borné par les données lues (fichier abîmé)
+        let lisibles = d.len().saturating_sub(bloc + entete) / 4;
+        (0..nombre.min(lisibles)).find_map(|i| {
             let p = bloc + entete + 4 * i;
             if u16_a(d, p)? as usize == eid {
                 u16_a(d, p + 2).map(|o| o as usize * 4)
