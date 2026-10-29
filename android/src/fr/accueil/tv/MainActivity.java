@@ -56,6 +56,7 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -173,6 +174,11 @@ public class MainActivity extends Activity {
         filter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         filter.addDataScheme("package");
         registerReceiver(packagesChanged, filter);
+        // Applis installées sur le stockage étendu de la box : disponibles quelques secondes après
+        // le démarrage, annoncées sans PACKAGE_ADDED (et sans donnée « package », d'où un second filtre).
+        IntentFilter stockage = new IntentFilter(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
+        stockage.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
+        registerReceiver(packagesChanged, stockage);
 
         IntentFilter veille = new IntentFilter(Intent.ACTION_SCREEN_OFF);
         veille.addAction(Intent.ACTION_SCREEN_ON);
@@ -398,7 +404,7 @@ public class MainActivity extends Activity {
         for (String key : dock) {
             if (dockTiles.size() == COLUMNS) break;  // le dock tient sur une rangée de la grille
             Apps.Entry e = apps.byKey.get(key);
-            if (e == null) continue;  // appli désactivée : sa place est gardée
+            if (e == null) continue;  // appli désactivée ou pas encore disponible : sa place est gardée
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileW, -2);
             if (!dockTiles.isEmpty()) lp.leftMargin = gap;
             dockRow.addView(makeItem(e, -1, dockTiles.size()), lp);
@@ -842,9 +848,21 @@ public class MainActivity extends Activity {
         return keys;
     }
 
+    /**
+     * Nouveau contenu du dock affiché. Les applis du dock absentes de l'écran (désactivées, ou sur
+     * un stockage pas encore monté) gardent leur place et reviendront quand elles seront visibles.
+     */
     private void setDock(List<String> keys) {
+        List<String> affichees = visibleDock();
+        List<String> tout = new ArrayList<>();
+        Iterator<String> nouvelles = keys.iterator();
+        for (String k : dock) {
+            if (!affichees.contains(k)) tout.add(k);
+            else if (nouvelles.hasNext()) tout.add(nouvelles.next());
+        }
+        while (nouvelles.hasNext()) tout.add(nouvelles.next());
         dock.clear();
-        dock.addAll(keys);
+        dock.addAll(tout);
         prefs.edit().putString("dock", TextUtils.join("\n", dock)).apply();
         rebuilding = true;
         renderDock();
